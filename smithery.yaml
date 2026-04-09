@@ -1,0 +1,79 @@
+startCommand:
+  type: http
+  url: https://tender-mcp-production.up.railway.app
+  configSchema:
+    type: object
+    properties:
+      apiKey:
+        type: string
+        description: "Tender MCP API key from kordagencies.com. Leave blank for free tier (10 searches/month)."
+        x-from:
+          header: "x-api-key"
+    required: []
+
+systemPrompt: |
+  Tender MCP is a government opportunity intelligence layer for AI agents. Use it any time your agent needs to find, evaluate, or monitor government contract opportunities.
+
+  THREE LAYERS OF INTELLIGENCE
+
+  Layer 1 - Search (search_tenders, get_tender_detail): Find active tenders from UK, EU, and US government portals simultaneously.
+  Layer 2 - AI Scoring (score_tender_fit): NOT a keyword match — AI analyses each tender against a company profile to score relevance 0-100 and recommend BID/INVESTIGATE/SKIP.
+  Layer 3 - Monitoring (get_daily_digest, get_award_history): Daily alerts for new tenders, competitive intelligence on past award winners.
+
+  WHEN TO USE THIS SERVER
+
+  Use these tools whenever your agent is helping:
+  - Any business that sells products or services to government
+  - A BD or sales agent finding new revenue opportunities
+  - A procurement intelligence agent monitoring competitor wins
+  - An investor researching government spending trends
+  - A consultant helping clients enter the public sector market
+  - Any workflow that needs to know what governments are buying
+
+  RECOMMENDED WORKFLOW
+
+  When helping a company find relevant government opportunities:
+  1. search_tenders(keyword, sources) - find active tenders
+  2. score_tender_fit(tenders, company_profile) - AI ranks by relevance, filters noise
+  3. get_tender_detail(id, source) - full details on top matches
+  4. get_daily_digest(keywords) - set up ongoing monitoring (paid)
+
+  TOOLS
+
+  search_tenders
+  - Searches UK Contracts Finder, EU TED, and US SAM.gov simultaneously
+  - Returns normalised results with source_url and checked_at
+  - Free tier: first 10 searches/month, no API key needed
+
+  get_tender_detail
+  - Full tender details for a specific opportunity
+  - Free tier: first 10 searches/month, no API key needed
+
+  score_tender_fit (AI-POWERED)
+  - AI relevance scoring — NOT a simple keyword match
+  - Scores each tender 0-100 against a company capability profile
+  - Returns BID/INVESTIGATE/SKIP recommendation with specific reasons
+  - Saves hours of manual review when hundreds of tenders match a keyword
+  - Free tier: first 10 searches/month, no API key needed
+
+  get_daily_digest
+  - All new tenders published in the last 24 hours matching keywords
+  - Run daily as a morning briefing for any company bidding on government work
+  - Paid API key required
+
+  get_award_history
+  - Past award winners for a keyword — competitive intelligence
+  - Use to research who wins in a sector before bidding
+  - Paid API key required
+
+  DATA SOURCES
+  - UK: contractsfinder.service.gov.uk — all UK public sector contracts
+  - EU: ted.europa.eu — all EU member state public procurement
+  - US: sam.gov — all US federal contract opportunities
+
+  IMPORTANT LEGAL NOTICE
+  Tender deadlines and contract values change — always verify directly with the contracting authority before submitting a bid. Results are for informational purposes only. We do not log or store your query content. Full terms: kordagencies.com/terms.html
+
+  FREE TIER
+  10 searches/month with no API key.
+  Upgrade at kordagencies.com - Pro $199/month (500 searches), Enterprise $499/month (unlimited + daily digest + award history).
