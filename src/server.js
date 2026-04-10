@@ -279,10 +279,24 @@ function normaliseEUTender(n) {
   const value = tvh ? (Array.isArray(tvh) ? tvh[0] : tvh) : (n['TV'] ? (Array.isArray(n['TV']) ? n['TV'][0] : n['TV']) : null);
   const cy = n['CY'];
   const country = cy ? (Array.isArray(cy) ? cy[0] : cy) : null;
-  const buyerArr = n['organisation-name-buyer'];
-  const buyer = buyerArr ? (Array.isArray(buyerArr) ? buyerArr[0] : buyerArr) : null;
+  // organisation-name-buyer can be: string, array, or multilingual object {"eng": ["Name"]}
+  const buyerRaw = n['organisation-name-buyer'];
+  let buyer = null;
+  if (buyerRaw) {
+    if (typeof buyerRaw === 'string') {
+      buyer = buyerRaw;
+    } else if (Array.isArray(buyerRaw)) {
+      buyer = buyerRaw[0] || null;
+    } else if (typeof buyerRaw === 'object') {
+      // multilingual object — extract eng, then first available language
+      const langVal = buyerRaw['eng'] || buyerRaw['fra'] || buyerRaw['deu'] || Object.values(buyerRaw)[0];
+      buyer = Array.isArray(langVal) ? (langVal[0] || null) : (langVal || null);
+    }
+  }
+  // deadline-date-lot — strip timezone suffix e.g. "2026-04-09+03:00" → "2026-04-09"
   const deadlineArr = n['deadline-date-lot'];
-  const deadline = deadlineArr ? (Array.isArray(deadlineArr) ? deadlineArr[0] : deadlineArr) : null;
+  const deadlineRaw = deadlineArr ? (Array.isArray(deadlineArr) ? deadlineArr[0] : deadlineArr) : null;
+  const deadline = deadlineRaw ? String(deadlineRaw).split('+')[0].split('T')[0] : null;
   // Best URL: English HTML link from links object, fallback to standard pattern
   let url = null;
   if (n['links'] && n['links']['html'] && n['links']['html']['ENG']) {
@@ -675,7 +689,7 @@ const server = http.createServer(async (req, res) => {
   const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, x-api-key, mcp-session-id, x-stats-key' };
   if (req.method === 'OPTIONS') { res.writeHead(200, cors); res.end(); return; }
 
-  if (req.url === '/health' && (req.method === 'GET' || req.method === 'HEAD')) {
+  if (req.url === '/health' && req.method === 'GET') {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'ok', version: '1.0.1', service: 'tender-mcp', free_tier: 'no API key required for first 10 searches/month', paid_keys_issued: apiKeys.size }));
     return;
