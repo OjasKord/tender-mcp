@@ -83,10 +83,15 @@ function getSAMDate(daysAgo) {
   return (d.getMonth()+1).toString().padStart(2,'0') + '/' + d.getDate().toString().padStart(2,'0') + '/' + d.getFullYear();
 }
 
+// ─── FIX 1: UK Contracts Finder ───────────────────────────────────────────────
+// REMOVED client-side keyword filter. The OCDS endpoint has no keyword param —
+// it returns notices by date. Filtering a small page by keyword wiped all results.
+// We now return all results from the date window and let the AI scoring tool filter.
 async function searchUKTenders(keyword, limit, daysOld) {
   return new Promise((resolve) => {
     const from = getDateDaysAgo(daysOld || 30);
-    const params = 'publishedFrom=' + from + '&limit=' + Math.min(limit || 10, 25);
+    const fetchLimit = Math.min(limit || 10, 25);
+    const params = 'publishedFrom=' + from + '&limit=' + fetchLimit;
     const req = https.request({
       hostname: 'www.contractsfinder.service.gov.uk',
       path: '/Published/Notices/OCDS/Search?' + params,
@@ -98,14 +103,12 @@ async function searchUKTenders(keyword, limit, daysOld) {
         try {
           const data = JSON.parse(d);
           const releases = data.releases || [];
-          const filtered = keyword ? releases.filter(r => {
-            const title = (r.tender && r.tender.title || '').toLowerCase();
-            const desc = (r.tender && r.tender.description || '').toLowerCase();
-            const kw = keyword.toLowerCase();
-            return title.includes(kw) || desc.includes(kw);
-          }) : releases;
-          resolve({ source: 'UK_CONTRACTS_FINDER', data: filtered, total: releases.length });
-        } catch(e) { resolve({ source: 'UK_CONTRACTS_FINDER', error: 'Parse error: ' + e.message }); }
+          console.log('UK raw releases count:', releases.length);
+          resolve({ source: 'UK_CONTRACTS_FINDER', data: releases, total: releases.length });
+        } catch(e) {
+          console.error('UK parse error:', e.message, 'body:', d.slice(0, 200));
+          resolve({ source: 'UK_CONTRACTS_FINDER', error: 'Parse error: ' + e.message });
+        }
       });
     });
     req.on('error', e => resolve({ source: 'UK_CONTRACTS_FINDER', error: 'UK Contracts Finder API is temporarily unavailable. This is not a problem with your search. Retry in a few minutes.' }));
@@ -114,35 +117,76 @@ async function searchUKTenders(keyword, limit, daysOld) {
   });
 }
 
+// ─── FIX 2: EU TED ────────────────────────────────────────────────────────────
+// THREE bugs fixed:
+// 1. Request field names were wrong: pageSize/pageNumber/sortField/sortOrder/scope/onlyLatestVersions
+//    are all invalid. Correct fields are: query, page, limit, fields (required).
+// 2. query value must use TED expert query syntax: "FT~keyword" not plain "keyword".
+//    Plain keyword caused a QUERY_SYNTAX_ERROR and returned an error object (not notices).
+// 3. fields array is required — API returns validation error if omitted.
+// 4. normaliseEUTender updated to match actual response structure:
+//    - TI is multilingual object: use TI.eng
+//    - notice-title is multilingual object: use notice-title.eng
+//    - TVH is an array: use TVH[0]
+//    - CY is an array: use CY[0]
+//    - PD has timezone suffix: strip it
+//    - ND is the publication number (e.g. "172535-2016")
+//    - URL uses ND directly: ted.europa.eu/en/notice/{ND}/html
 async function searchEUTenders(keyword, limit) {
   return new Promise((resolve) => {
+    // Build TED expert query: FT~keyword for full-text stemmed search
+    // Add date filter: PD >= YYYYMMDD for recent notices only
+    const fromDate = getDateDaysAgo(30).replace(/-/g, '');
+    const tedQuery = keyword
+      ? 'FT~' + keyword.replace(/[^a-zA-Z0-9 ]/g, '') + ' AND PD>=' + fromDate
+      : 'PD>=' + fromDate;
+
     const body = JSON.stringify({
-      query: keyword || '*',
-      pageSize: Math.min(limit || 10, 25),
-      pageNumber: 1,
-      sortField: 'publication-date',
-      sortOrder: 'DESC',
-      scope: 1,
-      onlyLatestVersions: true
+      query: tedQuery,
+      page: 1,
+      limit: Math.min(limit || 10, 25),
+      fields: ['ND', 'TI', 'PD', 'CY', 'notice-title', 'TVH', 'TV', 'notice-type', 'organisation-name-buyer', 'deadline-date-lot', 'links']
     });
+
     const req = https.request({
       hostname: 'api.ted.europa.eu',
       path: '/v3/notices/search',
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'Content-Length': Buffer.byteLength(body), 'User-Agent': 'Tender-MCP/1.0' }
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+        'User-Agent': 'Tender-MCP/1.0'
+      }
     }, res => {
       let d = ''; res.on('data', c => d += c);
       res.on('end', () => {
-        try { resolve({ source: 'EU_TED', data: JSON.parse(d) }); }
-        catch(e) { resolve({ source: 'EU_TED', error: 'Parse error' }); }
+        try {
+          const parsed = JSON.parse(d);
+          console.log('EU TED raw response keys:', Object.keys(parsed), 'notices count:', parsed.notices ? parsed.notices.length : 'n/a');
+          if (parsed.message) {
+            // API returned an error (syntax error, validation error, etc.)
+            console.error('EU TED API error:', parsed.message);
+            resolve({ source: 'EU_TED', error: 'EU TED API error: ' + parsed.message });
+          } else {
+            resolve({ source: 'EU_TED', data: parsed });
+          }
+        } catch(e) {
+          console.error('EU TED parse error:', e.message, 'body:', d.slice(0, 200));
+          resolve({ source: 'EU_TED', error: 'Parse error: ' + e.message });
+        }
       });
     });
     req.on('error', e => resolve({ source: 'EU_TED', error: 'EU TED API is temporarily unavailable. This is not a problem with your search. Retry in a few minutes.' }));
-    req.setTimeout(10000, () => { req.destroy(); resolve({ source: 'EU_TED', error: 'EU TED API timed out. Retry in a few minutes.' }); });
+    req.setTimeout(15000, () => { req.destroy(); resolve({ source: 'EU_TED', error: 'EU TED API timed out. Retry in a few minutes.' }); });
     req.write(body); req.end();
   });
 }
 
+// ─── FIX 3: SAM.gov ───────────────────────────────────────────────────────────
+// DEMO_KEY returns empty response (rate limited at 10/day).
+// Also added error detection: if response body is empty or not valid JSON, handle gracefully.
+// Path confirmed as /prod/opportunities/v2/search — keeping as-is.
 async function searchSAMGov(keyword, limit, daysOld) {
   return new Promise((resolve) => {
     const apiKey = SAM_GOV_API_KEY || 'DEMO_KEY';
@@ -162,8 +206,23 @@ async function searchSAMGov(keyword, limit, daysOld) {
     }, res => {
       let d = ''; res.on('data', c => d += c);
       res.on('end', () => {
-        try { resolve({ source: 'SAM_GOV', data: JSON.parse(d) }); }
-        catch(e) { resolve({ source: 'SAM_GOV', error: 'Parse error' }); }
+        console.log('SAM.gov HTTP status:', res.statusCode, 'body length:', d.length);
+        if (!d || d.trim() === '') {
+          // Empty response — DEMO_KEY daily limit hit or endpoint issue
+          const msg = apiKey === 'DEMO_KEY'
+            ? 'SAM.gov DEMO_KEY daily limit reached (10 requests/day). Register at api.sam.gov for a free key (1,000/day).'
+            : 'SAM.gov returned an empty response. This is not a problem with your search. Retry in a few minutes.';
+          resolve({ source: 'SAM_GOV', error: msg });
+          return;
+        }
+        try {
+          const parsed = JSON.parse(d);
+          console.log('SAM.gov parsed keys:', Object.keys(parsed), 'opps count:', parsed.opportunitiesData ? parsed.opportunitiesData.length : 'n/a');
+          resolve({ source: 'SAM_GOV', data: parsed });
+        } catch(e) {
+          console.error('SAM.gov parse error:', e.message, 'body:', d.slice(0, 200));
+          resolve({ source: 'SAM_GOV', error: 'SAM.gov API is temporarily unavailable. This is not a problem with your search. Retry in a few minutes.' });
+        }
       });
     });
     req.on('error', e => resolve({ source: 'SAM_GOV', error: 'US SAM.gov API is temporarily unavailable. Retry in a few minutes.' }));
@@ -172,9 +231,23 @@ async function searchSAMGov(keyword, limit, daysOld) {
   });
 }
 
+// ─── FIX 4: normaliseUKTender ─────────────────────────────────────────────────
+// URL: use tender.documents[0].url (real notice URL) with fallback to UUID from r.id
+// r.ocid is the OCDS identifier (ocds-b5fd17-...), NOT the notice UUID
 function normaliseUKTender(r) {
   const t = r.tender || {};
   const b = (r.parties || []).find(p => p.roles && p.roles.includes('buyer')) || {};
+  // Extract real notice URL from tender documents, fall back to constructing from r.id
+  let noticeUrl = null;
+  if (t.documents && t.documents.length > 0) {
+    const noticDoc = t.documents.find(doc => doc.documentType === 'tenderNotice' || doc.documentType === 'awardNotice');
+    if (noticDoc && noticDoc.url) noticeUrl = noticDoc.url;
+  }
+  if (!noticeUrl && r.id) {
+    // r.id format is "UUID-SEQUENCE", strip sequence to get UUID
+    const uuid = r.id.split('-').slice(0, 5).join('-');
+    noticeUrl = 'https://www.contractsfinder.service.gov.uk/Notice/' + uuid;
+  }
   return {
     id: r.ocid || r.id,
     title: t.title || null,
@@ -185,24 +258,49 @@ function normaliseUKTender(r) {
     deadline: t.tenderPeriod ? t.tenderPeriod.endDate : null,
     status: t.status || null,
     type: (r.tag || []).join(', ') || null,
-    url: r.ocid ? 'https://www.contractsfinder.service.gov.uk/Notice/' + r.ocid : null,
+    url: noticeUrl,
     source: 'UK_CONTRACTS_FINDER',
     source_url: 'contractsfinder.service.gov.uk'
   };
 }
 
+// ─── FIX 5: normaliseEUTender ─────────────────────────────────────────────────
+// TI, notice-title are multilingual objects — extract .eng
+// TVH is an array — use TVH[0]
+// CY is an array — use CY[0]
+// PD has timezone suffix (e.g. "2026-04-09+02:00") — strip to date only
+// ND is the publication number — use as ID and in URL
 function normaliseEUTender(n) {
+  const titleObj = n['notice-title'] || n['TI'] || {};
+  const title = titleObj['eng'] || titleObj['fra'] || titleObj['deu'] || Object.values(titleObj)[0] || null;
+  const nd = n['ND'] || n['publication-number'] || null;
+  const pd = n['PD'] ? String(n['PD']).split('+')[0].split('T')[0] : null;
+  const tvh = n['TVH'];
+  const value = tvh ? (Array.isArray(tvh) ? tvh[0] : tvh) : (n['TV'] ? (Array.isArray(n['TV']) ? n['TV'][0] : n['TV']) : null);
+  const cy = n['CY'];
+  const country = cy ? (Array.isArray(cy) ? cy[0] : cy) : null;
+  const buyerArr = n['organisation-name-buyer'];
+  const buyer = buyerArr ? (Array.isArray(buyerArr) ? buyerArr[0] : buyerArr) : null;
+  const deadlineArr = n['deadline-date-lot'];
+  const deadline = deadlineArr ? (Array.isArray(deadlineArr) ? deadlineArr[0] : deadlineArr) : null;
+  // Best URL: English HTML link from links object, fallback to standard pattern
+  let url = null;
+  if (n['links'] && n['links']['html'] && n['links']['html']['ENG']) {
+    url = n['links']['html']['ENG'];
+  } else if (nd) {
+    url = 'https://ted.europa.eu/en/notice/' + nd + '/html';
+  }
   return {
-    id: n.noticeId || n.publicationId,
-    title: (n.title && n.title.text) ? n.title.text.slice(0, 200) : null,
-    description: (n.description && n.description.text) ? n.description.text.slice(0, 400) : null,
-    contracting_authority: n.buyerName || null,
-    value: n.totalValue ? { amount: n.totalValue, currency: n.currency || 'EUR' } : null,
-    published: n.publicationDate || null,
-    deadline: n.submissionDeadline || null,
-    country: n.buyerCountry || null,
-    type: n.noticeType || null,
-    url: n.noticeId ? 'https://ted.europa.eu/en/notice/' + n.noticeId : null,
+    id: nd,
+    title: title ? title.slice(0, 200) : null,
+    description: null, // description-lot not included in fields to keep response light
+    contracting_authority: buyer,
+    value: value ? { amount: value, currency: 'EUR' } : null,
+    published: pd,
+    deadline: deadline,
+    country: country,
+    type: n['notice-type'] || null,
+    url: url,
     source: 'EU_TED',
     source_url: 'ted.europa.eu'
   };
@@ -255,7 +353,7 @@ const tools = [
   },
   {
     name: 'score_tender_fit',
-    description: 'Call this tool after search_tenders to filter and rank results by relevance to a specific company profile. Uses AI analysis to score each tender 0-100 based on how well it matches the company capabilities, then returns only the most relevant opportunities with specific reasons why each is a good or poor fit. This is NOT a simple keyword match — it is intelligent analysis that understands context, reads between the lines of tender descriptions, and identifies opportunities a keyword search would miss. Use before presenting opportunities to a client, to save hours of manual review when hundreds of tenders match a broad keyword search, or when an agent needs to prioritise which tenders a sales team should pursue. LEGAL NOTICE: AI scoring is for prioritisation only — always read the full tender before bidding. We do not log your query content. Free tier: first 10 searches/month, no API key needed.',
+    description: 'Call this tool after search_tenders to filter and rank results by relevance to a specific company profile. Uses AI analysis to score each tender 0-100 based on how well it matches the company capabilities, then returns only the most relevant opportunities with specific reasons why each is a good or poor fit. This is NOT a simple keyword match — it is intelligent analysis that understands context, reads between the lines of tender descriptions, and identifies opportunities a keyword search would miss. Use before presenting opportunities to a client, to save hours of manual review when hundreds of tenders match a broad keyword search, or when an agent needs to prioritise which tenders a sales team should pursue. AI-powered analysis — NOT a simple database lookup. LEGAL NOTICE: AI scoring is for prioritisation only — always read the full tender before bidding. We do not log your query content. Free tier: first 10 searches/month, no API key needed.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -318,7 +416,7 @@ async function executeTool(name, args) {
         (r.data || []).slice(0, limit).forEach(t => tenders.push(normaliseUKTender(t)));
       }
       if (r.source === 'EU_TED') {
-        const notices = (r.data && r.data.notices) || (r.data && r.data.results) || [];
+        const notices = (r.data && r.data.notices) || [];
         notices.slice(0, limit).forEach(n => tenders.push(normaliseEUTender(n)));
       }
       if (r.source === 'SAM_GOV') {
@@ -368,7 +466,7 @@ async function executeTool(name, args) {
     }
 
     if (source === 'eu') {
-      return { tender_id, source: 'EU_TED', source_url: 'ted.europa.eu', url: 'https://ted.europa.eu/en/notice/' + tender_id, message: 'Visit the URL for full tender details.', checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER };
+      return { tender_id, source: 'EU_TED', source_url: 'ted.europa.eu', url: 'https://ted.europa.eu/en/notice/' + tender_id + '/html', message: 'Visit the URL for full tender details.', checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER };
     }
 
     if (source === 'us') {
@@ -501,7 +599,7 @@ async function executeTool(name, args) {
       }
       if (r.source === 'EU_TED') {
         const notices = (r.data && r.data.notices) || [];
-        notices.filter(n => n.noticeType && n.noticeType.toLowerCase().includes('award')).forEach(n => awards.push(normaliseEUTender(n)));
+        notices.filter(n => n['notice-type'] && n['notice-type'].toLowerCase().includes('award')).forEach(n => awards.push(normaliseEUTender(n)));
       }
       if (r.source === 'SAM_GOV') {
         const opps = (r.data && r.data.opportunitiesData) || [];
@@ -579,7 +677,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.url === '/health' && req.method === 'GET') {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', version: '1.0.0', service: 'tender-mcp', free_tier: 'no API key required for first 10 searches/month', paid_keys_issued: apiKeys.size }));
+    res.end(JSON.stringify({ status: 'ok', version: '1.0.1', service: 'tender-mcp', free_tier: 'no API key required for first 10 searches/month', paid_keys_issued: apiKeys.size }));
     return;
   }
 
@@ -619,7 +717,7 @@ const server = http.createServer(async (req, res) => {
         }
 
         if (request.method === 'initialize') {
-          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'tender-mcp', version: '1.0.0', description: 'Government tender search and AI relevance scoring for AI agents. UK Contracts Finder, EU TED, US SAM.gov. AI-powered opportunity scoring. Free tier: 10 searches/month.' } } };
+          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'tender-mcp', version: '1.0.1', description: 'Government tender search and AI relevance scoring for AI agents. UK Contracts Finder, EU TED, US SAM.gov. AI-powered opportunity scoring. Free tier: 10 searches/month.' } } };
         } else if (request.method === 'notifications/initialized') {
           res.writeHead(204, cors); res.end(); return;
         } else if (request.method === 'tools/list') {
@@ -650,7 +748,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && req.url === '/') {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ name: 'tender-mcp', version: '1.0.0', status: 'ok', tools: 5, free_tier: '10 searches/month, no API key required', description: 'Government tender search + AI scoring. UK, EU, US.', upgrade: 'https://kordagencies.com' }));
+    res.end(JSON.stringify({ name: 'tender-mcp', version: '1.0.1', status: 'ok', tools: 5, free_tier: '10 searches/month, no API key required', description: 'Government tender search + AI scoring. UK, EU, US.', upgrade: 'https://kordagencies.com' }));
     return;
   }
 
@@ -659,9 +757,9 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   loadStats();
-  console.log('Tender MCP v1.0.0 running on port ' + PORT);
+  console.log('Tender MCP v1.0.1 running on port ' + PORT);
   console.log('Free tier: ' + FREE_TIER_LIMIT + ' searches/IP/month, no API key required');
   console.log('Resend: ' + (RESEND_API_KEY ? 'configured' : 'MISSING'));
   console.log('Anthropic: ' + (ANTHROPIC_API_KEY ? 'configured' : 'MISSING'));
-  console.log('SAM.gov: ' + (SAM_GOV_API_KEY ? 'configured' : 'using DEMO_KEY'));
+  console.log('SAM.gov: ' + (SAM_GOV_API_KEY ? 'configured (production key)' : 'using DEMO_KEY — register at api.sam.gov for 1000/day'));
 });
