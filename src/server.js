@@ -675,7 +675,7 @@ const server = http.createServer(async (req, res) => {
   const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, x-api-key, mcp-session-id, x-stats-key' };
   if (req.method === 'OPTIONS') { res.writeHead(200, cors); res.end(); return; }
 
-  if (req.url === '/health' && (req.method === 'GET' || req.method === 'HEAD')) {{
+  if (req.url === '/health' && (req.method === 'GET' || req.method === 'HEAD')) {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'ok', version: '1.0.1', service: 'tender-mcp', free_tier: 'no API key required for first 10 searches/month', paid_keys_issued: apiKeys.size }));
     return;
