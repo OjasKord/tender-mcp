@@ -689,9 +689,30 @@ const server = http.createServer(async (req, res) => {
   const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, x-api-key, mcp-session-id, x-stats-key' };
   if (req.method === 'OPTIONS') { res.writeHead(200, cors); res.end(); return; }
 
-  if (req.url === '/health' && req.method === 'GET') {
+  if (req.url === '/health' && (req.method === 'GET' || req.method === 'HEAD')) {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', version: '1.0.1', service: 'tender-mcp', free_tier: 'no API key required for first 10 searches/month', paid_keys_issued: apiKeys.size }));
+    res.end(JSON.stringify({ status: 'ok', version: '1.0.2', service: 'tender-mcp', free_tier: 'no API key required for first 10 searches/month', paid_keys_issued: apiKeys.size }));
+    return;
+  }
+
+  if (req.url === '/deps' && req.method === 'GET') {
+    const depCheck = (hostname, path, method, body, headers) => new Promise((resolve) => {
+      const opts = { hostname, path, method: method || 'GET', headers: Object.assign({ 'User-Agent': 'Tender-MCP-HealthCheck/1.0' }, headers || {}) };
+      const r = https.request(opts, (res2) => { res2.resume(); resolve({ ok: res2.statusCode < 500, status: res2.statusCode }); });
+      r.on('error', () => resolve({ ok: false, status: 0, error: 'unreachable' }));
+      r.setTimeout(5000, () => { r.destroy(); resolve({ ok: false, status: 0, error: 'timeout' }); });
+      if (body) r.write(body);
+      r.end();
+    });
+    const tedBody = JSON.stringify({ query: 'PD>=20260101', page: 1, limit: 1, fields: ['ND'] });
+    const [cf, ted, sam, ai] = await Promise.all([
+      depCheck('www.contractsfinder.service.gov.uk', '/Published/Notices/OCDS/Search?publishedFrom=2026-04-01&limit=1'),
+      depCheck('api.ted.europa.eu', '/v3/notices/search', 'POST', tedBody, { 'Content-Type': 'application/json', 'Content-Length': String(Buffer.byteLength(tedBody)) }),
+      depCheck('api.sam.gov', '/prod/opportunities/v2/search?api_key=' + (SAM_GOV_API_KEY || 'DEMO_KEY') + '&q=test&limit=1'),
+      depCheck('api.anthropic.com', '/v1/models', 'GET', null, { 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' })
+    ]);
+    res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ server: 'tender-mcp', checked_at: new Date().toISOString(), dependencies: { contracts_finder: cf, eu_ted: ted, sam_gov: sam, anthropic: ai } }));
     return;
   }
 
@@ -762,7 +783,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && req.url === '/') {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ name: 'tender-mcp', version: '1.0.1', status: 'ok', tools: 5, free_tier: '10 searches/month, no API key required', description: 'Government tender search + AI scoring. UK, EU, US.', upgrade: 'https://kordagencies.com' }));
+    res.end(JSON.stringify({ name: 'tender-mcp', version: '1.0.2', status: 'ok', tools: 5, free_tier: '10 searches/month, no API key required', description: 'Government tender search + AI scoring. UK, EU, US.', upgrade: 'https://kordagencies.com' }));
     return;
   }
 
@@ -771,7 +792,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   loadStats();
-  console.log('Tender MCP v1.0.1 running on port ' + PORT);
+  console.log('Tender MCP v1.0.2 running on port ' + PORT);
   console.log('Free tier: ' + FREE_TIER_LIMIT + ' searches/IP/month, no API key required');
   console.log('Resend: ' + (RESEND_API_KEY ? 'configured' : 'MISSING'));
   console.log('Anthropic: ' + (ANTHROPIC_API_KEY ? 'configured' : 'MISSING'));
