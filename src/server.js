@@ -13,6 +13,7 @@ const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
 const freeTierUsage = new Map();
 const usageLog = [];
 const FREE_TIER_LIMIT = 10;
+const FREE_TIER_WARNING = 8; // warn at 80% usage
 const apiKeys = new Map();
 const PLAN_LIMITS = { pro: 500, enterprise: Infinity };
 
@@ -691,7 +692,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.url === '/health' && (req.method === 'GET' || req.method === 'HEAD')) {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', version: '1.0.2', service: 'tender-mcp', free_tier: 'no API key required for first 10 searches/month', paid_keys_issued: apiKeys.size }));
+    res.end(JSON.stringify({ status: 'ok', version: '1.1.0', service: 'tender-mcp', free_tier: 'no API key required for first 10 searches/month', paid_keys_issued: apiKeys.size }));
     return;
   }
 
@@ -752,7 +753,7 @@ const server = http.createServer(async (req, res) => {
         }
 
         if (request.method === 'initialize') {
-          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'tender-mcp', version: '1.0.1', description: 'Government tender search and AI relevance scoring for AI agents. UK Contracts Finder, EU TED, US SAM.gov. AI-powered opportunity scoring. Free tier: 10 searches/month.' } } };
+          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'tender-mcp', version: '1.1.0', description: 'Government tender search and AI relevance scoring for AI agents. UK Contracts Finder, EU TED, US SAM.gov. AI-powered opportunity scoring. Free tier: 10 searches/month.' } } };
         } else if (request.method === 'notifications/initialized') {
           res.writeHead(204, cors); res.end(); return;
         } else if (request.method === 'tools/list') {
@@ -769,6 +770,49 @@ const server = http.createServer(async (req, res) => {
           saveStats();
           const result = await executeTool(name, toolArgs || {});
           if (req._accessWarning) result._notice = req._accessWarning;
+
+          // Partial response for free tier
+          if (req._tier === 'free' && !result.error) {
+            const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+            const used = freeTierUsage.get(ip) || 0;
+            const remaining = FREE_TIER_LIMIT - used;
+            const isWarning = used >= FREE_TIER_WARNING;
+
+            if (name === 'search_tenders' && result.tenders && result.tenders.length > 0) {
+              // Show 3 results, gate the rest
+              const totalFound = result.total_found;
+              const gatedCount = Math.max(0, totalFound - 3);
+              result.tenders = result.tenders.slice(0, 3);
+              result.total_found = totalFound;
+              if (gatedCount > 0) {
+                result._upgrade_note = 'Free tier: showing 3 of ' + totalFound + ' results (' + gatedCount + ' hidden). ' + remaining + ' of ' + FREE_TIER_LIMIT + ' free searches remaining this month. Upgrade to Pro ($199/month) at kordagencies.com for full results.';
+                result._gated_fields = ['tenders[3+]'];
+              } else {
+                result._upgrade_note = remaining + ' of ' + FREE_TIER_LIMIT + ' free searches remaining this month. Upgrade to Pro ($199/month) at kordagencies.com for unlimited searches.';
+              }
+            }
+
+            if (name === 'get_tender_detail' && !result.error) {
+              const gated = ['description', 'contact'];
+              gated.forEach(f => delete result[f]);
+              result._upgrade_note = remaining + ' of ' + FREE_TIER_LIMIT + ' free searches remaining. Upgrade to Pro ($199/month) at kordagencies.com for full tender description and contact details.';
+              result._gated_fields = gated;
+            }
+
+            if (name === 'score_tender_fit' && result.scored_tenders) {
+              // Keep scores and recommendations, gate reasons and market insight
+              result.scored_tenders = result.scored_tenders.map(t => {
+                const { reasons, ...rest } = t;
+                return { ...rest, _reasons_gated: true };
+              });
+              delete result.market_insight;
+              result._upgrade_note = remaining + ' of ' + FREE_TIER_LIMIT + ' free searches remaining. Upgrade to Pro ($199/month) at kordagencies.com for full reasoning behind each score and market insights.';
+              result._gated_fields = ['scored_tenders[].reasons', 'market_insight'];
+            }
+
+            if (isWarning) result._notice = 'Warning: only ' + remaining + ' free search' + (remaining === 1 ? '' : 'es') + ' left this month. Upgrade to Pro at kordagencies.com to avoid interruption.';
+          }
+
           response = { jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] } };
         } else {
           response = { jsonrpc: '2.0', id: request.id, error: { code: -32601, message: 'Method not found: ' + request.method } };
@@ -783,7 +827,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && req.url === '/') {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ name: 'tender-mcp', version: '1.0.2', status: 'ok', tools: 5, free_tier: '10 searches/month, no API key required', description: 'Government tender search + AI scoring. UK, EU, US.', upgrade: 'https://kordagencies.com' }));
+    res.end(JSON.stringify({ name: 'tender-mcp', version: '1.1.0', status: 'ok', tools: 5, free_tier: '10 searches/month, no API key required', description: 'Government tender search + AI scoring. UK, EU, US.', upgrade: 'https://kordagencies.com' }));
     return;
   }
 
@@ -792,7 +836,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   loadStats();
-  console.log('Tender MCP v1.0.2 running on port ' + PORT);
+  console.log('Tender MCP v1.1.0 running on port ' + PORT);
   console.log('Free tier: ' + FREE_TIER_LIMIT + ' searches/IP/month, no API key required');
   console.log('Resend: ' + (RESEND_API_KEY ? 'configured' : 'MISSING'));
   console.log('Anthropic: ' + (ANTHROPIC_API_KEY ? 'configured' : 'MISSING'));
