@@ -667,7 +667,34 @@ function checkAccess(req, toolName) {
   return { allowed: true, tier: 'free', remaining, warning: remaining < 3 ? remaining + ' free searches remaining. Upgrade at kordagencies.com' : null };
 }
 
-async function handleStripeWebhook(body) {
+function verifyStripeSignature(body, sig, secret) {
+  if (!secret) return false;
+  if (!sig) return false;
+  try {
+    const parts = sig.split(',').reduce((acc, part) => {
+      const [k, v] = part.split('=');
+      acc[k] = v;
+      return acc;
+    }, {});
+    const timestamp = parts['t'];
+    const expected = parts['v1'];
+    if (!timestamp || !expected) return false;
+    const signed = timestamp + '.' + body;
+    const computed = crypto.createHmac('sha256', secret).update(signed, 'utf8').digest('hex');
+    return crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(expected));
+  } catch(e) { return false; }
+}
+
+async function handleStripeWebhook(body, sig) {
+  const secret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!secret) {
+    console.error('[tender] STRIPE_WEBHOOK_SECRET not set — rejecting webhook');
+    return { error: 'Webhook secret not configured', status: 400 };
+  }
+  if (!verifyStripeSignature(body, sig, secret)) {
+    console.error('[tender] Invalid Stripe signature — rejecting webhook');
+    return { error: 'Invalid signature', status: 400 };
+  }
   try {
     const event = JSON.parse(body);
     if (event.type === 'checkout.session.completed') {
@@ -678,12 +705,12 @@ async function handleStripeWebhook(body) {
         const apiKey = generateApiKey();
         apiKeys.set(apiKey, { email, plan, createdAt: new Date().toISOString(), calls: 0, limit: PLAN_LIMITS[plan] });
         await sendApiKeyEmail(email, apiKey, plan);
-        console.log('API key created for ' + email + ' (' + plan + ')');
+        console.log('[tender] API key created for ' + email + ' (' + plan + ')');
         return { success: true, email, plan };
       }
     }
     return { received: true, type: event.type };
-  } catch(e) { console.error('Webhook error:', e.message); return { error: e.message }; }
+  } catch(e) { console.error('[tender] Webhook error:', e.message); return { error: e.message, status: 400 }; }
 }
 
 const server = http.createServer(async (req, res) => {
@@ -729,7 +756,14 @@ const server = http.createServer(async (req, res) => {
 
   if (req.url === '/webhook/stripe' && req.method === 'POST') {
     let body = ''; req.on('data', c => body += c);
-    req.on('end', async () => { const result = await handleStripeWebhook(body); res.writeHead(200, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify(result)); });
+    req.on('end', async () => {
+      const sig = req.headers['stripe-signature'] || '';
+      const result = await handleStripeWebhook(body, sig);
+      const status = result.status || 200;
+      delete result.status;
+      res.writeHead(status, { ...cors, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(result));
+    });
     return;
   }
 
