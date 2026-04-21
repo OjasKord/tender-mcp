@@ -1,19 +1,19 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.OjasKord/tender-mcp",
-  "description": "Government tender search and AI opportunity scoring. UK Contracts Finder, EU TED, US SAM.gov. Find and score government contract opportunities.",
+  "description": "Government tender search for AI agents. UK, EU & US procurement opportunities..",
   "title": "Tender MCP",
   "repository": {
     "url": "https://github.com/OjasKord/tender-mcp",
     "source": "github"
   },
-  "version": "1.0.0",
+  "version": "1.0.1",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "tender-mcp",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "transport": { "type": "stdio" }
     }
   ],
