@@ -1,3 +1,11 @@
+## [1.2.0] - 2026-04-21
+### Changed
+- Consolidated from 5 tools to 2: search_tenders and get_tender_intelligence
+- search_tenders now runs AI fit scoring automatically inline
+- get_tender_intelligence replaces get_daily_digest and get_award_history with mode parameter (DAILY_DIGEST or AWARD_HISTORY)
+- Free tier preview for intelligence tool returns real count before gating full results
+- Upgrade hooks in every response with specific conversion messaging
+
 # Changelog — Tender MCP
 
 ## v1.0.0 — 2026-04-09
