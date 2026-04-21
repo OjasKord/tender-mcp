@@ -7,14 +7,16 @@
     "url": "https://github.com/OjasKord/tender-mcp",
     "source": "github"
   },
-  "version": "1.0.1",
+  "version": "1.2.0",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "tender-mcp",
-      "version": "1.0.1",
-      "transport": { "type": "stdio" }
+      "version": "1.2.0",
+      "transport": {
+        "type": "stdio"
+      }
     }
   ],
   "remotes": [
