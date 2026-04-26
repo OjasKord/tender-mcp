@@ -3,7 +3,7 @@ const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
 
-const VERSION = '1.2.0';
+const VERSION = '1.2.2';
 const PERSIST_FILE = '/tmp/tender_stats.json';
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
@@ -296,7 +296,7 @@ async function executeTool(name, args, tier) {
   // ── TOOL 1: search_tenders ──────────────────────────────────────────────────
   if (name === 'search_tenders') {
     const { keyword, company_profile, sources = ['uk', 'eu', 'us'], limit, days_old, min_score } = args;
-    if (!keyword) return { error: 'keyword is required', _disclaimer: LEGAL_DISCLAIMER };
+    if (!keyword) return { error: 'keyword is required', agent_action: 'PROVIDE_REQUIRED_FIELD', _disclaimer: LEGAL_DISCLAIMER };
 
     const fetchLimit = Math.min(limit || 10, 25);
     const daysOld = days_old || 30;
@@ -352,10 +352,10 @@ async function executeTool(name, args, tier) {
           threshold_used: threshold,
           top_opportunities: aiResult.top_opportunities || [],
           market_insight: aiResult.market_insight || null,
-          analysis_type: 'AI-powered fit scoring — NOT a simple keyword match'
+          analysis_type: 'AI-powered fit scoring -- NOT a simple keyword match'
         };
       } catch(e) {
-        scoringMeta = { error: 'AI scoring unavailable — results returned unscored. Manual review recommended.' };
+        scoringMeta = { error: 'AI scoring unavailable -- results returned unscored. Manual review recommended.', agent_action: 'RETRY_IN_2_MIN' };
       }
     }
 
@@ -384,12 +384,12 @@ async function executeTool(name, args, tier) {
   // ── TOOL 2: get_tender_intelligence ────────────────────────────────────────
   if (name === 'get_tender_intelligence') {
     const { mode, keywords, keyword, sources = ['uk', 'eu', 'us'], limit } = args;
-    if (!mode) return { error: 'mode is required: DAILY_DIGEST or AWARD_HISTORY', _disclaimer: LEGAL_DISCLAIMER };
+    if (!mode) return { error: 'mode is required: DAILY_DIGEST or AWARD_HISTORY', agent_action: 'PROVIDE_REQUIRED_FIELD', _disclaimer: LEGAL_DISCLAIMER };
 
     // ── DAILY_DIGEST ──
     if (mode === 'DAILY_DIGEST') {
       if (!keywords || !Array.isArray(keywords) || keywords.length === 0) {
-        return { error: 'keywords array is required for DAILY_DIGEST mode', _disclaimer: LEGAL_DISCLAIMER };
+        return { error: 'keywords array is required for DAILY_DIGEST mode', agent_action: 'PROVIDE_REQUIRED_FIELD', _disclaimer: LEGAL_DISCLAIMER };
       }
 
       // Free tier preview: run one keyword, return count only — no full results
@@ -456,7 +456,7 @@ async function executeTool(name, args, tier) {
 
     // ── AWARD_HISTORY ──
     if (mode === 'AWARD_HISTORY') {
-      if (!keyword) return { error: 'keyword is required for AWARD_HISTORY mode', _disclaimer: LEGAL_DISCLAIMER };
+      if (!keyword) return { error: 'keyword is required for AWARD_HISTORY mode', agent_action: 'PROVIDE_REQUIRED_FIELD', _disclaimer: LEGAL_DISCLAIMER };
       const maxResults = Math.min(limit || 10, 25);
 
       // Free tier preview: run search, return winner count + one sample name only
@@ -524,10 +524,10 @@ async function executeTool(name, args, tier) {
       };
     }
 
-    return { error: 'Invalid mode. Use DAILY_DIGEST or AWARD_HISTORY.', _disclaimer: LEGAL_DISCLAIMER };
+    return { error: 'Invalid mode. Use DAILY_DIGEST or AWARD_HISTORY.', agent_action: 'PROVIDE_REQUIRED_FIELD', _disclaimer: LEGAL_DISCLAIMER };
   }
 
-  return { error: 'Unknown tool: ' + name };
+  return { error: 'Unknown tool: ' + name, agent_action: 'RETRY_IN_2_MIN' };
 }
 
 // ─── ACCESS CONTROL ───────────────────────────────────────────────────────────
@@ -687,7 +687,7 @@ const server = http.createServer(async (req, res) => {
 
           if (!access.allowed) {
             res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify({ error: access.reason, upgrade_url: 'https://kordagencies.com', _disclaimer: LEGAL_DISCLAIMER }) }] } }));
+            res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify({ error: access.reason, agent_action: access.tier === 'invalid' ? 'PROVIDE_REQUIRED_FIELD' : 'Inform user free tier quota is exhausted. Upgrade available at kordagencies.com', upgrade_url: 'https://kordagencies.com', _disclaimer: LEGAL_DISCLAIMER }) }] } }));
             return;
           }
 
@@ -743,6 +743,49 @@ const server = http.createServer(async (req, res) => {
 
   res.writeHead(404, cors); res.end(JSON.stringify({ error: 'Not found' }));
 });
+
+function setupStdio() {
+  if (process.stdin.isTTY) return;
+  let buf = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', chunk => {
+    buf += chunk;
+    let nl;
+    while ((nl = buf.indexOf('\n')) !== -1) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line) continue;
+      let req;
+      try { req = JSON.parse(line); } catch(e) { process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }) + '\n'); continue; }
+      let resp;
+      if (req.method === 'initialize') {
+        resp = { jsonrpc: '2.0', id: req.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'tender-mcp', version: VERSION, description: 'Government tender search and AI fit scoring. UK, EU, US. 2 tools. Free tier: 10 searches/month.' } } };
+      } else if (req.method === 'notifications/initialized') {
+        continue;
+      } else if (req.method === 'tools/list') {
+        resp = { jsonrpc: '2.0', id: req.id, result: { tools } };
+      } else if (req.method === 'resources/list') {
+        resp = { jsonrpc: '2.0', id: req.id, result: { resources: [] } };
+      } else if (req.method === 'prompts/list') {
+        resp = { jsonrpc: '2.0', id: req.id, result: { prompts: [] } };
+      } else if (req.method === 'tools/call') {
+        const { name, arguments: toolArgs } = req.params || {};
+        executeTool(name, toolArgs || {}, 'pro').then(result => {
+          process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: req.id, result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] } }) + '\n');
+        }).catch(err => {
+          process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: req.id, error: { code: -32603, message: err.message } }) + '\n');
+        });
+        continue;
+      } else {
+        resp = { jsonrpc: '2.0', id: req.id, error: { code: -32601, message: 'Method not found: ' + req.method } };
+      }
+      process.stdout.write(JSON.stringify(resp) + '\n');
+    }
+  });
+  process.stdin.resume();
+}
+
+setupStdio();
 
 server.listen(PORT, () => {
   loadStats();
