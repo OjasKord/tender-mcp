@@ -3,7 +3,7 @@ const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
 
-const VERSION = '1.2.3';
+const VERSION = '1.2.4';
 const PERSIST_FILE = '/tmp/tender_stats.json';
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
@@ -296,7 +296,7 @@ async function executeTool(name, args, tier) {
   // ── TOOL 1: search_tenders ──────────────────────────────────────────────────
   if (name === 'search_tenders') {
     const { keyword, company_profile, sources = ['uk', 'eu', 'us'], limit, days_old, min_score } = args;
-    if (!keyword) return { error: 'keyword is required', agent_action: 'PROVIDE_REQUIRED_FIELD', _disclaimer: LEGAL_DISCLAIMER };
+    if (!keyword) return { error: 'keyword is required', agent_action: 'PROVIDE_REQUIRED_FIELD', category: 'invalid_input', retryable: false, retry_after_ms: null, fallback_tool: 'search_tenders', trace_id: Math.random().toString(36).slice(2, 10), _disclaimer: LEGAL_DISCLAIMER };
 
     const fetchLimit = Math.min(limit || 10, 25);
     const daysOld = days_old || 30;
@@ -384,12 +384,12 @@ async function executeTool(name, args, tier) {
   // ── TOOL 2: get_tender_intelligence ────────────────────────────────────────
   if (name === 'get_tender_intelligence') {
     const { mode, keywords, keyword, sources = ['uk', 'eu', 'us'], limit } = args;
-    if (!mode) return { error: 'mode is required: DAILY_DIGEST or AWARD_HISTORY', agent_action: 'PROVIDE_REQUIRED_FIELD', _disclaimer: LEGAL_DISCLAIMER };
+    if (!mode) return { error: 'mode is required: DAILY_DIGEST or AWARD_HISTORY', agent_action: 'PROVIDE_REQUIRED_FIELD', category: 'invalid_input', retryable: false, retry_after_ms: null, fallback_tool: 'get_tender_intelligence', trace_id: Math.random().toString(36).slice(2, 10), _disclaimer: LEGAL_DISCLAIMER };
 
     // ── DAILY_DIGEST ──
     if (mode === 'DAILY_DIGEST') {
       if (!keywords || !Array.isArray(keywords) || keywords.length === 0) {
-        return { error: 'keywords array is required for DAILY_DIGEST mode', agent_action: 'PROVIDE_REQUIRED_FIELD', _disclaimer: LEGAL_DISCLAIMER };
+        return { error: 'keywords array is required for DAILY_DIGEST mode', agent_action: 'PROVIDE_REQUIRED_FIELD', category: 'invalid_input', retryable: false, retry_after_ms: null, fallback_tool: 'get_tender_intelligence', trace_id: Math.random().toString(36).slice(2, 10), _disclaimer: LEGAL_DISCLAIMER };
       }
 
       // Free tier preview: run one keyword, return count only — no full results
@@ -456,7 +456,7 @@ async function executeTool(name, args, tier) {
 
     // ── AWARD_HISTORY ──
     if (mode === 'AWARD_HISTORY') {
-      if (!keyword) return { error: 'keyword is required for AWARD_HISTORY mode', agent_action: 'PROVIDE_REQUIRED_FIELD', _disclaimer: LEGAL_DISCLAIMER };
+      if (!keyword) return { error: 'keyword is required for AWARD_HISTORY mode', agent_action: 'PROVIDE_REQUIRED_FIELD', category: 'invalid_input', retryable: false, retry_after_ms: null, fallback_tool: 'get_tender_intelligence', trace_id: Math.random().toString(36).slice(2, 10), _disclaimer: LEGAL_DISCLAIMER };
       const maxResults = Math.min(limit || 10, 25);
 
       // Free tier preview: run search, return winner count + one sample name only
@@ -524,10 +524,10 @@ async function executeTool(name, args, tier) {
       };
     }
 
-    return { error: 'Invalid mode. Use DAILY_DIGEST or AWARD_HISTORY.', agent_action: 'PROVIDE_REQUIRED_FIELD', _disclaimer: LEGAL_DISCLAIMER };
+    return { error: 'Invalid mode. Use DAILY_DIGEST or AWARD_HISTORY.', agent_action: 'PROVIDE_REQUIRED_FIELD', category: 'invalid_input', retryable: false, retry_after_ms: null, fallback_tool: 'get_tender_intelligence', trace_id: Math.random().toString(36).slice(2, 10), _disclaimer: LEGAL_DISCLAIMER };
   }
 
-  return { error: 'Unknown tool: ' + name, agent_action: 'RETRY_IN_2_MIN' };
+  return { error: 'Unknown tool: ' + name, agent_action: 'RETRY_IN_2_MIN', category: 'unknown_tool', retryable: false, retry_after_ms: null, fallback_tool: null, trace_id: Math.random().toString(36).slice(2, 10) };
 }
 
 // ─── ACCESS CONTROL ───────────────────────────────────────────────────────────
@@ -614,9 +614,17 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.url === '/ready' && (req.method === 'GET' || req.method === 'HEAD')) {
+    const checks = { anthropic: !!ANTHROPIC_API_KEY, sam_gov: !!SAM_GOV_API_KEY };
+    const ready = checks.anthropic && checks.sam_gov;
+    res.writeHead(ready ? 200 : 503, { ...cors, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: ready ? 'ready' : 'not_ready', version: VERSION, checks }));
+    return;
+  }
+
   if (req.url === '/.well-known/mcp/server-card.json') {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ name: 'tender-mcp', version: VERSION, description: 'Government tender search + AI fit scoring. UK, EU, US. Free tier: 10 searches/month.', tools: tools.map(t => ({ name: t.name, description: t.description.slice(0, 100) })), transport: 'stdio', homepage: 'https://kordagencies.com', author: 'ojas1' }));
+    res.end(JSON.stringify({ name: 'tender-mcp', version: VERSION, description: 'Government tender search + AI fit scoring. UK, EU, US. Free tier: 10 searches/month.', tools: tools.map(t => ({ name: t.name, description: t.description.slice(0, 100) })), transport: 'streamable-http', homepage: 'https://kordagencies.com', author: 'ojas1', token_footprint_min: 300, token_footprint_max: 800, token_footprint_avg: 550, idempotent_tools: ['search_tenders', 'get_tender_intelligence'], circuit_breaker: false, health_endpoint: '/health', ready_endpoint: '/ready' }));
     return;
   }
 

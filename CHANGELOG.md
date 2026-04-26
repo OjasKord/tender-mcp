@@ -1,3 +1,10 @@
+## [1.2.4] - 2026-04-27
+
+### Added
+- `token_count` field on all tool responses — lets orchestrator budget ledgers track token cost per call
+- `/ready` endpoint — returns 200 when `ANTHROPIC_API_KEY` and `SAM_GOV_API_KEY` are present, 503 otherwise
+- Phase 4 enhanced error objects: `category`, `retryable`, `retry_after_ms`, `fallback_tool`, `trace_id` on all error paths across both tools
+
 ## [1.2.3] - 2026-04-26
 
 ### Improved
