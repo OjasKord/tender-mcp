@@ -1,3 +1,10 @@
+## [1.2.2] - 2026-04-26
+### Changed
+- VERSION constant introduced as single source of truth (was behind package.json)
+- Added `agent_action` to all error responses (PROVIDE_REQUIRED_FIELD, RETRY_IN_2_MIN)
+- Added stdio transport for Claude Desktop / npm usage
+- Fixed em-dash in analysis_type and AI scoring error strings (ASCII --)
+
 ## [1.2.0] - 2026-04-21
 ### Changed
 - Consolidated from 5 tools to 2: search_tenders and get_tender_intelligence
