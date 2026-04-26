@@ -1,7 +1,7 @@
 {
   "name": "tender-mcp",
   "mcpName": "io.github.OjasKord/tender-mcp",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "Government tender search and AI opportunity scoring for AI agents. UK Contracts Finder, EU TED, US SAM.gov.",
   "main": "src/server.js",
   "scripts": {

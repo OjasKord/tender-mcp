@@ -1,3 +1,9 @@
+## [1.2.3] - 2026-04-26
+
+### Improved
+- search_tenders and get_tender_intelligence descriptions rewritten with TCO framework: deadline-miss consequence, exact government portal hostnames, prepaid bundle pricing last
+- Initialize serverInfo description rewritten for both HTTP and stdio transports
+
 ## [1.2.2] - 2026-04-26
 ### Changed
 - VERSION constant introduced as single source of truth (was behind package.json)
