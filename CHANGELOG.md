@@ -1,3 +1,9 @@
+## [1.2.5] - 2026-04-28
+
+### Changed
+- Payment links updated to prepaid bundle URLs: 500 searches for $8 -- calls never expire
+- Free tier limit errors now direct agents to prepaid bundle purchase link directly
+
 ## [1.2.4] - 2026-04-27
 
 ### Added

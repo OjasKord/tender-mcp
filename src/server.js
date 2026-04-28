@@ -3,7 +3,9 @@ const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
 
-const VERSION = '1.2.4';
+const VERSION = '1.2.5';
+const PRO_UPGRADE_URL = 'https://buy.stripe.com/9B600i5k1bPv2xC6Fqebu0n';
+const ENTERPRISE_UPGRADE_URL = 'https://buy.stripe.com/7sY7sKaEldXDegk0h2ebu0o';
 const PERSIST_FILE = '/tmp/tender_stats.json';
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
@@ -375,7 +377,7 @@ async function executeTool(name, args, tier) {
       message: 'Pro plan unlocks daily monitoring and award history for these keywords.',
       daily_digest: 'Get all new tenders matching "' + keyword + '" automatically every 24 hours — never miss an opportunity before competitors.',
       award_history: 'See which companies have won similar contracts and at what values — critical for bid pricing strategy.',
-      upgrade_url: 'https://kordagencies.com'
+      upgrade_url: PRO_UPGRADE_URL
     };
 
     return result;
@@ -412,7 +414,7 @@ async function executeTool(name, args, tier) {
           keyword_previewed: previewKeyword,
           new_tenders_found_today: previewCount,
           message: previewCount > 0
-            ? previewCount + ' new tenders matching "' + previewKeyword + '" were posted in the last 24 hours. Pro plan required to access them — upgrade at kordagencies.com before competitors do.'
+            ? previewCount + ' new tenders matching "' + previewKeyword + '" were posted in the last 24 hours. Get 500 searches for $8 at ' + PRO_UPGRADE_URL + ' -- calls never expire.'
             : 'No new tenders matching "' + previewKeyword + '" today. Pro plan monitors all your keywords daily and alerts you the moment new opportunities appear.',
           what_you_get_on_pro: [
             'All new tenders matching up to 5 keywords checked daily',
@@ -420,7 +422,7 @@ async function executeTool(name, args, tier) {
             'Results from UK, EU, and US simultaneously',
             '500 searches/month'
           ],
-          upgrade_url: 'https://kordagencies.com',
+          upgrade_url: PRO_UPGRADE_URL,
           checked_at: checkedAt,
           _disclaimer: LEGAL_DISCLAIMER
         };
@@ -494,7 +496,7 @@ async function executeTool(name, args, tier) {
             'Frequency analysis — who dominates your target sector',
             'Identify teaming partners or threats before bidding'
           ],
-          upgrade_url: 'https://kordagencies.com',
+          upgrade_url: PRO_UPGRADE_URL,
           checked_at: checkedAt,
           _disclaimer: LEGAL_DISCLAIMER
         };
@@ -549,8 +551,8 @@ function checkAccess(req, toolName) {
   if (calls >= FREE_TIER_LIMIT) {
     return {
       allowed: false,
-      reason: 'Free tier limit of ' + FREE_TIER_LIMIT + ' searches/month reached. You have seen it work — upgrade to Pro ($199/month) at kordagencies.com for 500 searches/month.',
-      upgrade_url: 'https://kordagencies.com',
+      reason: 'Free tier limit reached. Get 500 searches for $8 at ' + PRO_UPGRADE_URL + ' -- calls never expire.',
+      upgrade_url: PRO_UPGRADE_URL,
       tier: 'free_limit_reached'
     };
   }
@@ -559,7 +561,7 @@ function checkAccess(req, toolName) {
   const remaining = FREE_TIER_LIMIT - calls - 1;
   return {
     allowed: true, tier: 'free', remaining,
-    warning: remaining <= 2 ? remaining + ' free search' + (remaining === 1 ? '' : 'es') + ' remaining this month. Upgrade at kordagencies.com to avoid interruption.' : null
+    warning: remaining <= 2 ? remaining + ' free search' + (remaining === 1 ? '' : 'es') + ' remaining this month. Get 500 searches for $8 at ' + PRO_UPGRADE_URL + ' -- calls never expire.' : null
   };
 }
 
@@ -695,7 +697,7 @@ const server = http.createServer(async (req, res) => {
 
           if (!access.allowed) {
             res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify({ error: access.reason, agent_action: access.tier === 'invalid' ? 'PROVIDE_REQUIRED_FIELD' : 'Inform user free tier quota is exhausted. Upgrade available at kordagencies.com', upgrade_url: 'https://kordagencies.com', _disclaimer: LEGAL_DISCLAIMER }) }] } }));
+            res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify({ error: access.reason, agent_action: access.tier === 'invalid' ? 'PROVIDE_REQUIRED_FIELD' : 'Inform user free tier quota is exhausted. Get 500 searches for $8 at ' + PRO_UPGRADE_URL + ' -- calls never expire.', upgrade_url: PRO_UPGRADE_URL, _disclaimer: LEGAL_DISCLAIMER }) }] } }));
             return;
           }
 
@@ -714,15 +716,15 @@ const server = http.createServer(async (req, res) => {
             const hidden = total - shown.length;
             result.tenders = shown;
             if (hidden > 0) {
-              result._free_tier = 'Showing 3 of ' + total + ' results (' + hidden + ' hidden). ' + (access.remaining || 0) + ' free searches remaining this month. Upgrade to Pro ($199/month) at kordagencies.com for full results.';
+              result._free_tier = 'Showing 3 of ' + total + ' results (' + hidden + ' hidden). ' + (access.remaining || 0) + ' free searches remaining this month. Get 500 searches for $8 at ' + PRO_UPGRADE_URL + ' -- calls never expire.';
             }
             // Gate reasons on scoring for free tier
             if (result.scoring && result.scoring.market_insight) {
-              result.scoring.market_insight = '[Upgrade to Pro for market insights — kordagencies.com]';
+              result.scoring.market_insight = '[Get 500 searches for $8 at ' + PRO_UPGRADE_URL + ' for market insights]';
             }
             if (result.tenders) {
               result.tenders = result.tenders.map(t => {
-                if (t.reasons) { const { reasons, ...rest } = t; return { ...rest, _reasons: '[Upgrade to Pro for full scoring reasons — kordagencies.com]' }; }
+                if (t.reasons) { const { reasons, ...rest } = t; return { ...rest, _reasons: '[Get 500 searches for $8 at ' + PRO_UPGRADE_URL + ' for full scoring reasons]' }; }
                 return t;
               });
             }
@@ -745,7 +747,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && req.url === '/') {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ name: 'tender-mcp', version: VERSION, status: 'ok', tools: 2, free_tier: '10 searches/month, no API key required', description: 'Government tender search + AI fit scoring. UK, EU, US.', upgrade: 'https://kordagencies.com' }));
+    res.end(JSON.stringify({ name: 'tender-mcp', version: VERSION, status: 'ok', tools: 2, free_tier: '10 searches/month, no API key required', description: 'Government tender search + AI fit scoring. UK, EU, US.', upgrade: PRO_UPGRADE_URL }));
     return;
   }
 
