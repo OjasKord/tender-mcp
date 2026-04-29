@@ -1,3 +1,5 @@
+[![smithery badge](https://smithery.ai/badge/OjasKord/tender-mcp)](https://smithery.ai/servers/OjasKord/tender-mcp)
+
 # Tender MCP — Government Opportunity Intelligence for AI Agents
 
 Find, score, and monitor government contract opportunities across UK, EU, and US. AI-powered relevance scoring so your agent surfaces the right opportunities — not just keyword matches.
