@@ -89,11 +89,11 @@ Every response includes `source_url` and `checked_at`.
 
 ## Pricing
 
-| Plan | Searches | Features | Price |
-|---|---|---|---|
-| Free | 10/month | search_tenders, get_tender_detail, score_tender_fit | No API key required |
-| Pro | 500/month | All tools including daily digest + award history | $199/month |
-| Enterprise | Unlimited | All tools + priority support | $499/month |
+| Plan | Searches | Price |
+|---|---|---|
+| Free | 10/month | No API key required |
+| Starter | 500-call bundle | $8 |
+| Pro | 2,000-call bundle | $28 |
 
 Upgrade at **[kordagencies.com](https://kordagencies.com)**
 
