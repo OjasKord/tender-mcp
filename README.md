@@ -22,6 +22,49 @@ Or via Smithery:
 npx -y @smithery/cli@latest mcp add OjasKord/tender-mcp
 ```
 
+## Harness Integration
+
+### Claude Code / Claude Desktop (.mcp.json)
+```json
+{
+  "mcpServers": {
+    "tender": {
+      "type": "http",
+      "url": "https://tender-mcp-production.up.railway.app"
+    }
+  }
+}
+```
+
+### LangChain (Python)
+```python
+from langchain_mcp_adapters.client import MultiServerMCPClient
+client = MultiServerMCPClient({
+    "tender": {
+        "url": "https://tender-mcp-production.up.railway.app",
+        "transport": "http"
+    }
+})
+tools = await client.get_tools()
+```
+
+### OpenAI Agents SDK (Python)
+```python
+from agents import Agent, HostedMCPTool
+agent = Agent(
+    name="Assistant",
+    tools=[HostedMCPTool(tool_config={
+        "type": "mcp",
+        "server_label": "tender",
+        "server_url": "https://tender-mcp-production.up.railway.app",
+        "require_approval": "never"
+    })]
+)
+```
+
+### LangGraph
+Same as LangChain above — langchain-mcp-adapters works with LangGraph natively.
+
 ## Why Use This
 
 Any business that sells to government needs to monitor tender opportunities. But searching three separate government portals daily, reading hundreds of notices, and manually judging relevance takes hours. Tender MCP does it in seconds — search UK, EU, and US simultaneously, then let AI score which opportunities actually match your capabilities.
