@@ -1,3 +1,18 @@
+## [1.2.10] - 2026-06-04
+
+### Added
+- Upstash Redis persistence: free tier usage, API keys, session logs survive redeploys
+- `loadFreeTierFromRedis()` / `saveFreeTierToRedis()` with Math.max merge pattern
+- `saveKeyToRedis()` / `loadApiKeysFromRedis()` with prefix `tender`
+- `appendSessionLog(ip, tool)` with 24h TTL per IP per day
+- `/session-log` endpoint (requires x-stats-key)
+- `free_tier_breakdown` per-IP object on `/stats` response
+- `getEffectiveLimit(ip)` helper — returns base + trial extension if applicable
+
+### Changed
+- Tool descriptions rewritten for orchestral agent runtime selection: state-based triggers, chaining instructions, DO NOT USE conditions
+- `VERSION` bumped to `1.2.10`
+
 ## [1.2.9] - 2026-06-02
 
 ### Fixed

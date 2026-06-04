@@ -3,7 +3,7 @@ const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
 
-const VERSION = '1.2.9';
+const VERSION = '1.2.10';
 const PRO_UPGRADE_URL = 'https://buy.stripe.com/9B600i5k1bPv2xC6Fqebu0n';
 const ENTERPRISE_UPGRADE_URL = 'https://buy.stripe.com/7sY7sKaEldXDegk0h2ebu0o';
 const PERSIST_FILE = '/tmp/tender_stats.json';
@@ -24,10 +24,23 @@ const toolUsageCounts = {};
 const trialExtensions = new Map();
 const TRIAL_EXTENSION_CALLS = 10;
 
+const REDIS_PREFIX = 'tender';
+const FREE_TIER_REDIS_KEY = 'tender:free_tier_usage';
+const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
+const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+
 const LEGAL_DISCLAIMER = 'Tender data is sourced directly from official government portals: UK Contracts Finder (contractsfinder.service.gov.uk), EU TED (ted.europa.eu), and US SAM.gov (sam.gov). We do not log or store your query content. Tender deadlines and contract values may change — always verify directly with the contracting authority before submitting a bid. Results are for informational purposes only. Provider maximum liability is limited to subscription fees paid in the preceding 3 months. Full terms: kordagencies.com/terms.html';
 
 function nowISO() { return new Date().toISOString(); }
 function getMonthKey(ip) { return ip + ':' + new Date().toISOString().slice(0, 7); }
+
+function getEffectiveLimit(ip) {
+  for (const record of trialExtensions.values()) {
+    if (record.ip === ip) return FREE_TIER_LIMIT + TRIAL_EXTENSION_CALLS;
+  }
+  return FREE_TIER_LIMIT;
+}
+
 function getTodayDate() { return new Date().toISOString().split('T')[0]; }
 function getDateDaysAgo(days) {
   const d = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
@@ -110,6 +123,105 @@ async function callClaude(prompt) {
     }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => { try { resolve(JSON.parse(d).content?.[0]?.text || ''); } catch(e) { reject(e); } }); });
     req.on('error', reject); req.write(body); req.end();
   });
+}
+
+// ─── REDIS HELPERS ────────────────────────────────────────────────────────────
+
+async function redisGet(key) {
+  try {
+    const res = await fetch(
+      `${UPSTASH_URL}/get/${encodeURIComponent(key)}`,
+      { headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` } }
+    );
+    const data = await res.json();
+    if (data.error) console.error('[Redis] redisGet error:', data.error, 'key:', key);
+    if (!data.result) return null;
+    return JSON.parse(data.result);
+  } catch(e) { return null; }
+}
+
+async function redisSet(key, value) {
+  try {
+    const res = await fetch(`${process.env.UPSTASH_REDIS_REST_URL}/set/${encodeURIComponent(key)}/${encodeURIComponent(JSON.stringify(value))}`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}` }
+    });
+    const data = await res.json();
+    if (data.error) console.error('[Redis] redisSet error:', data.error, 'key:', key);
+  } catch(e) { console.error('[Redis] redisSet failed:', e); }
+}
+
+async function redisExpire(key, seconds) {
+  try {
+    const res = await fetch(
+      `${UPSTASH_URL}/expire/${encodeURIComponent(key)}/${seconds}`,
+      { method: 'POST', headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` } }
+    );
+    const data = await res.json();
+    if (data.error) console.error('[Redis] redisExpire error:', data.error, 'key:', key);
+  } catch(e) { console.error('[Redis] redisExpire failed:', e); }
+}
+
+async function redisKeys(pattern) {
+  try {
+    const res = await fetch(
+      `${UPSTASH_URL}/keys/${encodeURIComponent(pattern)}`,
+      { headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` } }
+    );
+    const data = await res.json();
+    if (data.error) console.error('[Redis] redisKeys error:', data.error, 'pattern:', pattern);
+    return data.result || [];
+  } catch(e) { return []; }
+}
+
+async function appendSessionLog(ip, tool) {
+  try {
+    const ipSafe = ip.replace(/:/g, '_').replace(/\s/g, '');
+    const dayKey = new Date().toISOString().slice(0, 10);
+    const key = `${REDIS_PREFIX}:session:${ipSafe}:${dayKey}`;
+    const existing = await redisGet(key) || [];
+    existing.push({ tool, timestamp: new Date().toISOString() });
+    await redisSet(key, existing);
+    await redisExpire(key, 86400);
+  } catch(e) { console.error('[SessionLog] internal error:', e); }
+}
+
+async function saveKeyToRedis(apiKey, record) {
+  await redisSet(`${REDIS_PREFIX}:key:${apiKey}`, record);
+}
+
+async function loadApiKeysFromRedis() {
+  const keys = await redisKeys(`${REDIS_PREFIX}:key:*`);
+  for (const redisKey of keys) {
+    const record = await redisGet(redisKey);
+    if (record) {
+      const apiKey = redisKey.replace(`${REDIS_PREFIX}:key:`, '');
+      apiKeys.set(apiKey, record);
+    }
+  }
+  console.log(`Loaded ${apiKeys.size} API keys from Redis`);
+}
+
+async function loadFreeTierFromRedis() {
+  try {
+    const data = await redisGet(FREE_TIER_REDIS_KEY);
+    if (data && Array.isArray(data)) {
+      data.forEach(([k, v]) => freeTierUsage.set(k, v));
+      console.log('[FreeTier] Loaded ' + freeTierUsage.size + ' IPs from Redis');
+    }
+  } catch(e) { console.error('[FreeTier] load failed:', e); }
+}
+
+async function saveFreeTierToRedis() {
+  try {
+    const existing = await redisGet(FREE_TIER_REDIS_KEY) || [];
+    const existingMap = new Map(existing);
+    for (const [key, value] of freeTierUsage.entries()) {
+      const existingCount = existingMap.get(key) || 0;
+      existingMap.set(key, Math.max(existingCount, value));
+    }
+    await redisSet(FREE_TIER_REDIS_KEY, Array.from(existingMap.entries()));
+  } catch(e) { console.error('[FreeTier] save failed:', e); }
 }
 
 // ─── DATA SOURCES ─────────────────────────────────────────────────────────────
@@ -283,7 +395,7 @@ const tools = [
   {
     name: 'search_tenders',
     idempotent: true,
-    description: 'Call this tool BEFORE your agent contacts any potential client, partner, or supplier in a market where procurement contracts are active. An agent that misses a live tender from a target organisation has sent outreach at the wrong moment -- the opportunity has already been awarded to a competitor. The only MCP that queries UK Contracts Finder (contractsfinder.service.gov.uk), EU TED (api.ted.europa.eu/v3), and US SAM.gov (api.sam.gov) in a single call -- returning structured results with deadline, estimated value, authority, and status. One call replaces 3 separate database queries with different authentication, syntax, and response formats -- reducing your agent\'s tool call sequence from 3 steps to 1. Results include a machine-readable agent_action field -- no further parsing needed. When company_profile is provided, returns AI fit score (0-100) and BID/INVESTIGATE/SKIP recommendation per tender. We do not log your query content. Free tier: 10 calls/month, no API key required.',
+    description: 'Call this at the moment your workflow needs to identify procurement opportunities in one or more markets. Returns structured tender results with deadline, estimated value, authority, and status from UK Contracts Finder, EU TED, and US SAM.gov in one call. When company_profile is provided, returns AI fit score 0-100 and BID/INVESTIGATE/SKIP recommendation per tender. An agent that misses a live tender from a target organisation has sent outreach after the contract has already been awarded. Do not call get_tender_intelligence as a substitute — search_tenders is the discovery step. Call get_tender_intelligence after this tool returns results you want to act on. We do not log your query content. Free tier: 10 calls/month, no API key required.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -300,7 +412,7 @@ const tools = [
   {
     name: 'get_tender_intelligence',
     idempotent: true,
-    description: 'Call this tool IMMEDIATELY AFTER search_tenders returns a matching opportunity -- before your agent allocates resource, drafts a response, or routes the tender to a human team. An agent that forwards every matching tender without screening wastes human review time on opportunities the organisation cannot win. Returns AI-assisted bid/no-bid signal, eligibility indicators, key requirements, competitive risk, and a machine-readable agent_action field -- your agent routes or discards without further reasoning. We do not log your query content. Free tier returns a preview count. Full results require Pro API key from kordagencies.com.',
+    description: 'Call this standalone to get structured tender intelligence without running a search. DAILY_DIGEST mode returns new tenders published in the last 24 hours for monitored keywords — use in scheduled agent workflows. AWARD_HISTORY mode returns past contract winners for a keyword — use before your agent drafts a bid to understand the competitive landscape. Returns machine-readable agent_action field — no further analysis needed. Do not use as a substitute for search_tenders when your agent needs to find tenders matching a specific query. We do not log your query content. Free tier returns a preview count. Full results require Pro API key from kordagencies.com.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -586,10 +698,12 @@ function checkAccess(req, toolName) {
   }
   freeTierUsage.set(monthKey, calls + 1);
   saveStats();
+  saveFreeTierToRedis().catch(() => {});
   const remaining = FREE_TIER_LIMIT - calls - 1;
+  const effectiveLimit = getEffectiveLimit(ip);
   return {
     allowed: true, tier: 'free', remaining,
-    warning: remaining <= 2 ? remaining + ' free search' + (remaining === 1 ? '' : 'es') + ' remaining this month. Get 500 searches for $8 at ' + PRO_UPGRADE_URL + ' -- calls never expire.' : null
+    warning: remaining <= 2 ? remaining + ' free search' + (remaining === 1 ? '' : 'es') + ' remaining this month (limit: ' + effectiveLimit + '). Get 500 searches for $8 at ' + PRO_UPGRADE_URL + ' -- calls never expire.' : null
   };
 }
 
@@ -618,7 +732,9 @@ async function handleStripeWebhook(body, sig) {
       const plan = getPlanFromProduct(session.metadata?.product_name || '');
       if (email) {
         const apiKey = generateApiKey();
-        apiKeys.set(apiKey, { email, plan, createdAt: nowISO(), calls: 0, limit: PLAN_LIMITS[plan] });
+        const record = { email, plan, createdAt: nowISO(), calls: 0, limit: PLAN_LIMITS[plan] };
+        apiKeys.set(apiKey, record);
+        await saveKeyToRedis(apiKey, record);
         saveApiKeys();
         await sendApiKeyEmail(email, apiKey, plan);
         console.log('[tender] API key created for ' + email + ' (' + plan + ')');
@@ -684,8 +800,37 @@ const server = http.createServer(async (req, res) => {
     if (req.headers['x-stats-key'] !== STATS_KEY) { res.writeHead(401, cors); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     const totalFreeCalls = Array.from(freeTierUsage.values()).reduce((a, b) => a + b, 0);
     const freeUniqueIPs = new Set(Array.from(freeTierUsage.keys()).map(k => k.split(':')[0])).size;
+    const monthPrefix = new Date().toISOString().slice(0, 7);
+    const breakdown = {};
+    for (const [key, count] of freeTierUsage.entries()) {
+      if (key.includes(':' + monthPrefix)) {
+        const ip = key.split(':')[0];
+        breakdown[ip.slice(0, 10) + '...'] = count;
+      }
+    }
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ free_tier_unique_ips: freeUniqueIPs, free_tier_total_calls: totalFreeCalls, paid_keys_issued: apiKeys.size, tool_usage: toolUsageCounts, recent_calls: usageLog.slice(-20).reverse(), trial_extensions_granted: trialExtensions.size }));
+    res.end(JSON.stringify({ free_tier_unique_ips: freeUniqueIPs, free_tier_total_calls: totalFreeCalls, paid_keys_issued: apiKeys.size, tool_usage: toolUsageCounts, recent_calls: usageLog.slice(-20).reverse(), trial_extensions_granted: trialExtensions.size, free_tier_breakdown: breakdown }));
+    return;
+  }
+
+  if (req.url === '/session-log' && req.method === 'GET') {
+    if (req.headers['x-stats-key'] !== STATS_KEY) { res.writeHead(401, cors); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    (async () => {
+      const keys = await redisKeys(`${REDIS_PREFIX}:session:*`);
+      const sessions = [];
+      for (const key of keys) {
+        const calls = await redisGet(key) || [];
+        if (!calls.length) continue;
+        const withoutPrefix = key.slice(`${REDIS_PREFIX}:session:`.length);
+        const dateIdx = withoutPrefix.lastIndexOf(':');
+        const ipPart = withoutPrefix.slice(0, dateIdx);
+        const date = withoutPrefix.slice(dateIdx + 1);
+        sessions.push({ ip: ipPart.slice(0, 8), date, calls, first_call: calls[0]?.timestamp || '', last_call: calls[calls.length - 1]?.timestamp || '' });
+      }
+      sessions.sort((a, b) => new Date(b.first_call) - new Date(a.first_call));
+      res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(sessions));
+    })();
     return;
   }
 
@@ -761,6 +906,7 @@ const server = http.createServer(async (req, res) => {
           if (usageLog.length > 1000) usageLog.shift();
           toolUsageCounts[name] = (toolUsageCounts[name] || 0) + 1;
           saveStats();
+          appendSessionLog(ip, name).catch((e) => console.error('[SessionLog] appendSessionLog failed:', e));
 
           const result = await executeTool(name, toolArgs || {}, access.tier);
           if (access.warning) result._notice = access.warning;
@@ -853,9 +999,11 @@ function setupStdio() {
 
 setupStdio();
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   loadStats();
   loadApiKeys();
+  await loadApiKeysFromRedis();
+  await loadFreeTierFromRedis();
   console.log('Tender MCP v' + VERSION + ' running on port ' + PORT);
   console.log('Tools: 2 (search_tenders, get_tender_intelligence)');
   console.log('Free tier: ' + FREE_TIER_LIMIT + ' searches/IP/month');
