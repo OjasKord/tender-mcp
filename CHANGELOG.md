@@ -1,3 +1,6 @@
+## [1.2.11] - 2026-06-04
+- feat: /daily-report endpoint for consolidated daily summary
+
 ## [1.2.10] - 2026-06-04
 
 ### Added
