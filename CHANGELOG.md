@@ -1,3 +1,6 @@
+## [1.2.12] - 2026-06-05
+- feat: Smithery optimisation - updated package.json description/keywords and smithery.yaml with system prompt
+
 ## [1.2.11] - 2026-06-04
 - feat: /daily-report endpoint for consolidated daily summary
 

@@ -1,31 +1,26 @@
 {
   "name": "tender-mcp",
   "mcpName": "io.github.OjasKord/tender-mcp",
-  "version": "1.2.11",
-  "description": "Government tender search and AI opportunity scoring for AI agents. UK Contracts Finder, EU TED, US SAM.gov.",
+  "version": "1.2.12",
+  "description": "Government tender search for AI agents. UK, EU, US contracts with AI bid scoring. BID/SKIP verdict with deadline and value in one call.",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js"
   },
   "keywords": [
     "mcp",
-    "agent",
     "tender",
     "procurement",
-    "government",
-    "contracts",
-    "bidding",
     "government-contracts",
-    "sam-gov",
+    "uk-contracts-finder",
     "eu-ted",
-    "contracts-finder",
+    "sam-gov",
     "bid-scoring",
-    "ai-scoring",
     "public-sector",
     "rfp",
     "rfq",
-    "opportunity-search",
-    "validator"
+    "contracts",
+    "agentic-finance"
   ],
   "author": "Kord Agencies Pte Ltd <ojas@kordagencies.com>",
   "license": "MIT",

@@ -1,4 +1,9 @@
-description: "Government tender search for AI agents. UK, EU, US contracts with AI bid scoring."
+name: Tender MCP
+description: "When your agent needs to identify procurement opportunities, call search_tenders. Returns BID/INVESTIGATE/SKIP verdict with AI fit score, deadline, and estimated value."
+categories:
+  - Finance
+  - Research
+  - Productivity
 startCommand:
   type: http
   url: https://tender-mcp-production.up.railway.app
@@ -11,60 +16,4 @@ startCommand:
         x-from:
           header: "x-api-key"
     required: []
-systemPrompt: |
-  Tender MCP is a government procurement intelligence layer for AI agents.
-
-  It combines live tender search across three government portals (UK Contracts Finder, EU TED, US SAM.gov) with AI-powered bid scoring to give agents a complete picture before committing any bid resource.
-
-  TWO LAYERS OF INTELLIGENCE
-
-  Layer 1 - Live Tender Search (search_tenders)
-  Searches UK, EU, and US government portals simultaneously and returns normalised results with deadline, value, source, and source URL. One call replaces three separate portal searches.
-
-  Layer 2 - AI Bid Intelligence (get_tender_intelligence)
-  NOT a keyword match -- AI analyses each tender against a company profile to score relevance 0-100 and return a BID / INVESTIGATE / SKIP recommendation with specific reasons. Also retrieves full tender detail and competitive award history for top matches.
-
-  WHEN TO USE THIS SERVER
-
-  Use these tools whenever your agent is helping:
-  - Any business that sells products or services to government
-  - A BD or sales agent identifying new revenue opportunities
-  - A procurement intelligence agent monitoring competitor wins
-  - An investor researching government spending trends
-  - A consultant helping clients enter the public sector market
-  - Any workflow that needs to know what governments are buying
-
-  RECOMMENDED WORKFLOW
-
-  When helping a company find and qualify government opportunities:
-  1. search_tenders(keyword, sources) - find active tenders across UK, EU, US simultaneously
-  2. get_tender_intelligence(tenders, company_profile) - AI scores each tender 0-100, returns BID/INVESTIGATE/SKIP with reasons
-  Only invest bid resource in opportunities where get_tender_intelligence returns BID.
-
-  TOOLS
-
-  search_tenders
-  - Searches UK Contracts Finder, EU TED, and US SAM.gov simultaneously
-  - Returns normalised results with title, value, deadline, source, and source_url
-  - Use this first to build the opportunity list before scoring
-  - Free tier: first 10 searches/month, no API key needed
-
-  get_tender_intelligence (AI-POWERED)
-  - AI relevance scoring -- NOT a simple keyword match
-  - Scores each tender 0-100 against a company capability profile
-  - Returns BID / INVESTIGATE / SKIP recommendation with specific reasons per opportunity
-  - Also retrieves full tender detail and past award winners for competitive intelligence
-  - Saves hours of manual review when dozens of tenders match a keyword
-  - Paid API key required for full intelligence reports
-
-  DATA SOURCES
-  - UK: contractsfinder.service.gov.uk -- all UK public sector contracts
-  - EU: ted.europa.eu -- all EU member state public procurement
-  - US: sam.gov -- all US federal contract opportunities
-
-  LEGAL NOTICE
-  Tender deadlines and contract values change -- always verify directly with the contracting authority before submitting a bid. Results are for informational purposes only. We do not log your query content. Full terms: kordagencies.com/terms.html
-
-  FREE TIER
-  10 searches/month with no API key. Covers search_tenders only.
-  Upgrade at kordagencies.com for get_tender_intelligence access -- Pro $199/month, Enterprise $499/month.
+systemPrompt: "You are a procurement intelligence specialist. Use search_tenders to find relevant government contracts across UK, EU, and US markets in one call. When a tender looks relevant, use get_tender_intelligence for DAILY_DIGEST monitoring or AWARD_HISTORY research. Never advise on bidding without first checking active tenders."
