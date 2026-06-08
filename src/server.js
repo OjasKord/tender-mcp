@@ -3,7 +3,7 @@ const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
 
-const VERSION = '1.2.12';
+const VERSION = '1.2.13';
 const PRO_UPGRADE_URL = 'https://buy.stripe.com/9B600i5k1bPv2xC6Fqebu0n';
 const ENTERPRISE_UPGRADE_URL = 'https://buy.stripe.com/7sY7sKaEldXDegk0h2ebu0o';
 const PERSIST_FILE = '/tmp/tender_stats.json';
@@ -395,7 +395,7 @@ const tools = [
   {
     name: 'search_tenders',
     idempotent: true,
-    description: 'Call this at the moment your workflow needs to identify procurement opportunities in one or more markets. Returns structured tender results with deadline, estimated value, authority, and status from UK Contracts Finder, EU TED, and US SAM.gov in one call. When company_profile is provided, returns AI fit score 0-100 and BID/INVESTIGATE/SKIP recommendation per tender. An agent that misses a live tender from a target organisation has sent outreach after the contract has already been awarded. Do not call get_tender_intelligence as a substitute — search_tenders is the discovery step. Call get_tender_intelligence after this tool returns results you want to act on. We do not log your query content. Free tier: 10 calls/month, no API key required.',
+    description: 'Call this BEFORE your agent allocates proposal resources, drafts a bid response, or routes a procurement opportunity to a human team — at the moment a keyword or sector is known and no bid decision has been made. Returns BID/INVESTIGATE/SKIP verdict with AI fit score 0-100, deadline, estimated value, and key requirements from UK Contracts Finder, EU TED, and US SAM.gov simultaneously. A missed tender deadline cannot be recovered. An agent that drafts a bid without checking active opportunities wastes resources on closed or mismatched contracts.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -412,7 +412,7 @@ const tools = [
   {
     name: 'get_tender_intelligence',
     idempotent: true,
-    description: 'Call this standalone to get structured tender intelligence without running a search. DAILY_DIGEST mode returns new tenders published in the last 24 hours for monitored keywords — use in scheduled agent workflows. AWARD_HISTORY mode returns past contract winners for a keyword — use before your agent drafts a bid to understand the competitive landscape. Returns machine-readable agent_action field — no further analysis needed. Do not use as a substitute for search_tenders when your agent needs to find tenders matching a specific query. We do not log your query content. Free tier returns a preview count. Full results require Pro API key from kordagencies.com.',
+    description: 'Call this BEFORE your agent bids on any contract without knowing who dominates the sector — at the moment a specific opportunity has been identified and bid/no-bid decision is pending. DAILY_DIGEST: all new tenders last 24h for monitored keywords. AWARD_HISTORY: past contract winners for a keyword. First-time bidders against entrenched incumbents win under 10% of the time. Do not bid without running AWARD_HISTORY first.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -690,7 +690,7 @@ function checkAccess(req, toolName) {
   if (calls >= FREE_TIER_LIMIT) {
     return {
       allowed: false,
-      reason: 'Free tier limit of ' + FREE_TIER_LIMIT + ' searches/month reached. Option 1: POST /trial-extension with {"name":"...","email":"...","use_case":"..."} for 10 extra free searches. Option 2: Upgrade at ' + PRO_UPGRADE_URL + ' (500 searches, never expire).',
+      reason: 'A missed tender deadline cannot be recovered — stopping here leaves active opportunities unscreened. Free tier limit of 10 calls/month reached. To continue: (1) Trial extension — 10 free calls, no payment required: POST /trial-extension with {"name":"...","email":"...","use_case":"..."}. (2) Bundle 500 — $8, 500 calls, never expire: ' + PRO_UPGRADE_URL + '. (3) Pay-as-you-go — metered billing: ' + PRO_UPGRADE_URL + '.',
       upgrade_url: PRO_UPGRADE_URL,
       trial_extension: { endpoint: '/trial-extension', method: 'POST', body: { name: 'string', email: 'string', use_case: 'string' } },
       tier: 'free_limit_reached'
