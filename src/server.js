@@ -3,7 +3,7 @@ const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
 
-const VERSION = '1.2.13';
+const VERSION = '1.2.14';
 const PRO_UPGRADE_URL = 'https://buy.stripe.com/9B600i5k1bPv2xC6Fqebu0n';
 const ENTERPRISE_UPGRADE_URL = 'https://buy.stripe.com/7sY7sKaEldXDegk0h2ebu0o';
 const PERSIST_FILE = '/tmp/tender_stats.json';
@@ -23,6 +23,22 @@ const PLAN_LIMITS = { pro: 500, enterprise: Infinity };
 const toolUsageCounts = {};
 const trialExtensions = new Map();
 const TRIAL_EXTENSION_CALLS = 10;
+
+const perMinuteUsage = new Map();
+
+function checkPerMinuteLimit(ip, toolName, limit) {
+  const minuteKey = ip + ':' + toolName + ':' + new Date().toISOString().slice(0, 16);
+  const count = perMinuteUsage.get(minuteKey) || 0;
+  if (count >= limit) return false;
+  perMinuteUsage.set(minuteKey, count + 1);
+  if (perMinuteUsage.size > 10000) {
+    const currentMinute = new Date().toISOString().slice(0, 16);
+    for (const [key] of perMinuteUsage) {
+      if (!key.includes(currentMinute)) perMinuteUsage.delete(key);
+    }
+  }
+  return true;
+}
 
 const REDIS_PREFIX = 'tender';
 const FREE_TIER_REDIS_KEY = 'tender:free_tier_usage';
@@ -943,6 +959,19 @@ const server = http.createServer(async (req, res) => {
           response = { jsonrpc: '2.0', id: request.id, result: { prompts: [] } };
         } else if (request.method === 'tools/call') {
           const { name, arguments: toolArgs } = request.params;
+          const killSwitchKey = 'TOOL_DISABLED_' + name.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+          if (process.env[killSwitchKey] === 'true') {
+            res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify({ error: 'This tool is temporarily unavailable for maintenance.', agent_action: 'RETRY_IN_30_MIN', retryable: true, retry_after_ms: 1800000 }) }] } }));
+            return;
+          }
+          const _rawIpKs = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+          const _clientIpKs = _rawIpKs.split(',')[0].trim();
+          if (['search_tenders', 'get_tender_intelligence'].includes(name) && !checkPerMinuteLimit(_clientIpKs, name, 10)) {
+            res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify({ error: 'Rate limit exceeded — maximum 10 calls per minute per IP on AI-powered tools. Your workflow is calling this tool too rapidly.', agent_action: 'RETRY_IN_60_SEC', retryable: true, retry_after_ms: 60000, limit: 10, window: '1 minute' }) }] } }));
+            return;
+          }
           const access = checkAccess(req, name);
 
           if (!access.allowed) {
@@ -1033,6 +1062,11 @@ function setupStdio() {
         resp = { jsonrpc: '2.0', id: req.id, result: { prompts: [] } };
       } else if (req.method === 'tools/call') {
         const { name, arguments: toolArgs } = req.params || {};
+        const _ks = 'TOOL_DISABLED_' + (name || '').toUpperCase().replace(/[^A-Z0-9]/g, '_');
+        if (process.env[_ks] === 'true') {
+          process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: req.id, result: { content: [{ type: 'text', text: JSON.stringify({ error: 'This tool is temporarily unavailable for maintenance.', agent_action: 'RETRY_IN_30_MIN', retryable: true, retry_after_ms: 1800000 }) }] } }) + '\n');
+          continue;
+        }
         executeTool(name, toolArgs || {}, 'pro').then(result => {
           process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: req.id, result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] } }) + '\n');
         }).catch(err => {
