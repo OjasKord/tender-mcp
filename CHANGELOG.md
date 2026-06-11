@@ -1,3 +1,6 @@
+## [1.2.16] - 2026-06-11
+- feat: add /.well-known/mcp/server-card.json static metadata endpoint
+
 ## [1.2.15] - 2026-06-11
 - fix: bump version past existing npm publish (1.2.14 already on registry)
 
