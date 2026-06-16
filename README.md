@@ -2,6 +2,8 @@
 
 # Tender MCP — Government Opportunity Intelligence for AI Agents
 
+[![ToolRank](https://toolrank.dev/badge/dominant.svg)](https://toolrank.dev/ranking)
+
 Find, score, and monitor government contract opportunities across UK, EU, and US. AI-powered relevance scoring so your agent surfaces the right opportunities — not just keyword matches.
 
 **Free tier: 10 searches/month. No API key required. Just connect and go.**

@@ -3,7 +3,7 @@ const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
 
-const VERSION = '1.2.16';
+const VERSION = '1.2.17';
 const PRO_UPGRADE_URL = 'https://buy.stripe.com/9B600i5k1bPv2xC6Fqebu0n';
 const ENTERPRISE_UPGRADE_URL = 'https://buy.stripe.com/7sY7sKaEldXDegk0h2ebu0o';
 const PERSIST_FILE = '/tmp/tender_stats.json';
@@ -411,7 +411,7 @@ const tools = [
   {
     name: 'search_tenders',
     idempotent: true,
-    description: 'Call this BEFORE your agent allocates proposal resources, drafts a bid response, or routes a procurement opportunity to a human team — at the moment a keyword or sector is known and no bid decision has been made. Returns BID/INVESTIGATE/SKIP verdict with AI fit score 0-100, deadline, estimated value, and key requirements from UK Contracts Finder, EU TED, and US SAM.gov simultaneously. A missed tender deadline cannot be recovered. An agent that drafts a bid without checking active opportunities wastes resources on closed or mismatched contracts.',
+    description: 'Searches active government tenders across UK, EU, and US. Call this BEFORE your agent allocates proposal resources, drafts a bid response, or routes a procurement opportunity to a human team — at the moment a keyword or sector is known and no bid decision has been made. Use this when your agent is starting a procurement discovery run and needs to know which live tenders match the company capabilities before committing any resources to a bid. Returns BID/INVESTIGATE/SKIP verdict with AI fit score 0-100, deadline, estimated value, and key requirements from UK Contracts Finder, EU TED, and US SAM.gov simultaneously. A missed tender deadline cannot be recovered. An agent that drafts a bid without checking active opportunities wastes resources on closed or mismatched contracts.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -428,7 +428,7 @@ const tools = [
   {
     name: 'get_tender_intelligence',
     idempotent: true,
-    description: 'Call this BEFORE your agent bids on any contract without knowing who dominates the sector — at the moment a specific opportunity has been identified and bid/no-bid decision is pending. DAILY_DIGEST: all new tenders last 24h for monitored keywords. AWARD_HISTORY: past contract winners for a keyword. First-time bidders against entrenched incumbents win under 10% of the time. Do not bid without running AWARD_HISTORY first.',
+    description: 'Retrieves tender intelligence including daily digest and award history. Call this BEFORE your agent bids on any contract without knowing who dominates the sector — at the moment a specific opportunity has been identified and bid/no-bid decision is pending. Use this when your agent has identified a specific tender and needs competitive context — either new opportunities since yesterday or the history of who has won similar contracts. DAILY_DIGEST: all new tenders last 24h for monitored keywords. AWARD_HISTORY: past contract winners for a keyword. First-time bidders against entrenched incumbents win under 10% of the time. Do not bid without running AWARD_HISTORY first.',
     inputSchema: {
       type: 'object',
       properties: {
