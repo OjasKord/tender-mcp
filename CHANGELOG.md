@@ -1,3 +1,6 @@
+## [1.2.19] - 2026-06-17
+- fix: Stripe webhook now validates payment_link ID — ignores events not belonging to this server
+
 ## [1.2.18] - 2026-06-17
 - feat: SmitheryBot detection on search_tenders and get_tender_intelligence — returns mock empty results without consuming SAM.gov/UK/EU TED API credits
 

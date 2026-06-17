@@ -3,9 +3,10 @@ const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
 
-const VERSION = '1.2.18';
+const VERSION = '1.2.19';
 const PRO_UPGRADE_URL = 'https://buy.stripe.com/9B600i5k1bPv2xC6Fqebu0n';
 const ENTERPRISE_UPGRADE_URL = 'https://buy.stripe.com/7sY7sKaEldXDegk0h2ebu0o';
+const ALLOWED_PAYMENT_LINK_IDS = ['plink_1TQz8hD6WvRe6sn3qXhoyAWT', 'plink_1TQzAhD6WvRe6sn3P0CAabOs'];
 const PERSIST_FILE = '/tmp/tender_stats.json';
 const API_KEYS_FILE = '/tmp/tender_apikeys.json';
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
@@ -744,6 +745,11 @@ async function handleStripeWebhook(body, sig) {
     const event = JSON.parse(body);
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
+      const paymentLinkId = session.payment_link;
+      if (paymentLinkId && !ALLOWED_PAYMENT_LINK_IDS.includes(paymentLinkId)) {
+        console.log('[tender] Webhook received but payment link ' + paymentLinkId + ' not for this server — ignoring.');
+        return { received: true, ignored: true };
+      }
       const email = session.customer_email || session.customer_details?.email;
       const plan = getPlanFromProduct(session.metadata?.product_name || '');
       if (email) {
