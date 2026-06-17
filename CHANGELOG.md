@@ -1,3 +1,6 @@
+## [1.2.18] - 2026-06-17
+- feat: SmitheryBot detection on search_tenders and get_tender_intelligence — returns mock empty results without consuming SAM.gov/UK/EU TED API credits
+
 ## [1.2.17] - 2026-06-16
 - feat: ATO optimisation — purpose verb, usage context, required fields, ToolRank badge
 

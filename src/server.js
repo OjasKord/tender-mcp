@@ -3,7 +3,7 @@ const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
 
-const VERSION = '1.2.17';
+const VERSION = '1.2.18';
 const PRO_UPGRADE_URL = 'https://buy.stripe.com/9B600i5k1bPv2xC6Fqebu0n';
 const ENTERPRISE_UPGRADE_URL = 'https://buy.stripe.com/7sY7sKaEldXDegk0h2ebu0o';
 const PERSIST_FILE = '/tmp/tender_stats.json';
@@ -967,6 +967,12 @@ const server = http.createServer(async (req, res) => {
           }
           const _rawIpKs = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
           const _clientIpKs = _rawIpKs.split(',')[0].trim();
+          if (['search_tenders', 'get_tender_intelligence'].includes(name) && (req.headers['user-agent'] || '').toLowerCase().includes('smithery')) {
+            // Detect Smithery scanner and return mock response to avoid consuming SAM.gov/UK/EU TED API credits
+            res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify({ tenders: [], total_found: 0, sources_searched: [], _note: 'Mock response — scanner detected' }) }] } }));
+            return;
+          }
           if (['search_tenders', 'get_tender_intelligence'].includes(name) && !checkPerMinuteLimit(_clientIpKs, name, 10)) {
             res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify({ error: 'Rate limit exceeded — maximum 10 calls per minute per IP on AI-powered tools. Your workflow is calling this tool too rapidly.', agent_action: 'RETRY_IN_60_SEC', retryable: true, retry_after_ms: 60000, limit: 10, window: '1 minute' }) }] } }));
