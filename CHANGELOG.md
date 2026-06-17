@@ -1,3 +1,6 @@
+## [1.2.20] - 2026-06-17
+- fix: sendEmail now logs Resend HTTP errors in Railway logs
+
 ## [1.2.19] - 2026-06-17
 - fix: Stripe webhook now validates payment_link ID — ignores events not belonging to this server
 

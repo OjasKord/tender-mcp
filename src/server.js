@@ -3,7 +3,7 @@ const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
 
-const VERSION = '1.2.19';
+const VERSION = '1.2.20';
 const PRO_UPGRADE_URL = 'https://buy.stripe.com/9B600i5k1bPv2xC6Fqebu0n';
 const ENTERPRISE_UPGRADE_URL = 'https://buy.stripe.com/7sY7sKaEldXDegk0h2ebu0o';
 const ALLOWED_PAYMENT_LINK_IDS = ['plink_1TQz8hD6WvRe6sn3qXhoyAWT', 'plink_1TQzAhD6WvRe6sn3P0CAabOs'];
@@ -118,8 +118,11 @@ async function sendEmail(to, subject, html) {
     const req = https.request({
       hostname: 'api.resend.com', path: '/emails', method: 'POST',
       headers: { 'Authorization': 'Bearer ' + RESEND_API_KEY, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
-    }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => resolve({ status: res.statusCode, body: d })); });
-    req.on('error', e => resolve({ error: e.message }));
+    }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => {
+      if (res.statusCode < 200 || res.statusCode >= 300) console.error('[Resend] Email failed: HTTP ' + res.statusCode + ' ' + d);
+      resolve({ status: res.statusCode, body: d });
+    }); });
+    req.on('error', e => { console.error('[Resend] Email network error:', e.message); resolve({ error: e.message }); });
     req.write(body); req.end();
   });
 }
