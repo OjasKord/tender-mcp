@@ -3,7 +3,7 @@
   "name": "io.github.OjasKord/tender-mcp",
   "title": "Tender MCP",
   "description": "Government tender search for AI agents. UK, EU and US procurement opportunities.",
-  "version": "1.2.6",
+  "version": "1.2.18",
   "websiteUrl": "https://kordagencies.com",
   "repository": {
     "url": "https://github.com/OjasKord/tender-mcp",
@@ -13,12 +13,24 @@
     {
       "registryType": "npm",
       "identifier": "tender-mcp",
-      "version": "1.2.6",
-      "transport": { "type": "stdio" },
+      "version": "1.2.17",
+      "transport": {
+        "type": "stdio"
+      },
       "environmentVariables": [
-        { "name": "ANTHROPIC_API_KEY", "description": "Anthropic API key for AI-powered tender scoring", "isRequired": true, "isSecret": true }
+        {
+          "name": "ANTHROPIC_API_KEY",
+          "description": "Anthropic API key for AI-powered tender scoring",
+          "isRequired": true,
+          "isSecret": true
+        }
       ]
     }
   ],
-  "remotes": [{ "type": "streamable-http", "url": "https://tender-mcp-production.up.railway.app" }]
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://tender-mcp-production.up.railway.app"
+    }
+  ]
 }
