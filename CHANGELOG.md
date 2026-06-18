@@ -1,3 +1,6 @@
+## [1.2.21] - 2026-06-18
+- feat: revoke API key on Stripe refund
+
 ## [1.2.20] - 2026-06-17
 - fix: sendEmail now logs Resend HTTP errors in Railway logs
 
