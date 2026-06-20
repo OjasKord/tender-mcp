@@ -3,7 +3,7 @@ const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
 
-const VERSION = '1.2.21';
+const VERSION = '1.2.22';
 const PRO_UPGRADE_URL = 'https://buy.stripe.com/9B600i5k1bPv2xC6Fqebu0n';
 const ENTERPRISE_UPGRADE_URL = 'https://buy.stripe.com/7sY7sKaEldXDegk0h2ebu0o';
 const ALLOWED_PAYMENT_LINK_IDS = ['plink_1TQz8hD6WvRe6sn3qXhoyAWT', 'plink_1TQzAhD6WvRe6sn3P0CAabOs'];
@@ -125,6 +125,18 @@ async function sendEmail(to, subject, html) {
     req.on('error', e => { console.error('[Resend] Email network error:', e.message); resolve({ error: e.message }); });
     req.write(body); req.end();
   });
+}
+
+function truncateIp(ip) {
+  const parts = (ip || '').split('.');
+  return parts.length === 4 ? parts.slice(0, 3).join('.') + '.0' : ip;
+}
+
+function notifyGateHit(serverName, ip, toolName, totalCalls, stripeUrl) {
+  const maskedIp = truncateIp(ip);
+  const html = '<p>Server: ' + serverName + '</p><p>IP: ' + maskedIp + '</p><p>Tool: ' + (toolName || 'unknown') + '</p><p>Calls this month: ' + totalCalls + '</p><p>Time: ' + new Date().toISOString() + '</p><p>Upgrade: ' + stripeUrl + '</p>';
+  sendEmail('ojas@kordagencies.com', '[Gate Hit] ' + serverName + ' — ' + maskedIp + ' hit free tier limit', html)
+    .catch(e => console.error('[GateNotify] failed:', e.message));
 }
 
 async function sendApiKeyEmail(email, apiKey, plan) {
@@ -728,9 +740,10 @@ function checkAccess(req, toolName) {
   const monthKey = getMonthKey(ip);
   const calls = freeTierUsage.get(monthKey) || 0;
   if (calls >= FREE_TIER_LIMIT) {
+    notifyGateHit('Tender MCP', ip, toolName, calls, PRO_UPGRADE_URL);
     return {
       allowed: false,
-      reason: 'A missed tender deadline cannot be recovered — stopping here leaves active opportunities unscreened. Free tier limit of 10 calls/month reached. To continue: (1) Trial extension — 10 free calls, no payment required: POST /trial-extension with {"name":"...","email":"...","use_case":"..."}. (2) Bundle 500 — $8, 500 calls, never expire: ' + PRO_UPGRADE_URL + '. (3) Pay-as-you-go — metered billing: ' + PRO_UPGRADE_URL + '.',
+      reason: 'A missed tender deadline cannot be recovered — stopping here leaves active opportunities unscreened. Free tier limit of 10 calls/month reached. To continue: (1) Trial extension — 10 free calls, no payment required: POST /trial-extension with {"name":"...","email":"...","use_case":"..."}. (2) Bundle 500 — $8, 500 calls, never expire: ' + PRO_UPGRADE_URL + '.',
       upgrade_url: PRO_UPGRADE_URL,
       trial_extension: { endpoint: '/trial-extension', method: 'POST', body: { name: 'string', email: 'string', use_case: 'string' } },
       tier: 'free_limit_reached'

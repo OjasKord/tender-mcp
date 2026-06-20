@@ -1,3 +1,7 @@
+## [1.2.22] - 2026-06-20
+- feat: email notification on free tier gate hit
+- fix: remove duplicate/non-existent pay-as-you-go Stripe link from free tier gate message
+
 ## [1.2.21] - 2026-06-18
 - feat: revoke API key on Stripe refund
 
