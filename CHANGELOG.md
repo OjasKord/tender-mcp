@@ -1,3 +1,6 @@
+## [1.2.23] - 2026-06-23
+- fix: gate returns HTTP 402 (x402 standard for non-transient quota)
+
 ## [1.2.22] - 2026-06-20
 - feat: email notification on free tier gate hit
 - fix: remove duplicate/non-existent pay-as-you-go Stripe link from free tier gate message

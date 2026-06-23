@@ -3,7 +3,7 @@ const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
 
-const VERSION = '1.2.22';
+const VERSION = '1.2.23';
 const PRO_UPGRADE_URL = 'https://buy.stripe.com/9B600i5k1bPv2xC6Fqebu0n';
 const ENTERPRISE_UPGRADE_URL = 'https://buy.stripe.com/7sY7sKaEldXDegk0h2ebu0o';
 const ALLOWED_PAYMENT_LINK_IDS = ['plink_1TQz8hD6WvRe6sn3qXhoyAWT', 'plink_1TQzAhD6WvRe6sn3P0CAabOs'];
@@ -1057,7 +1057,7 @@ const server = http.createServer(async (req, res) => {
           const access = checkAccess(req, name);
 
           if (!access.allowed) {
-            res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+            res.writeHead(402, { ...cors, 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify({ error: access.reason, agent_action: access.tier === 'invalid' ? 'PROVIDE_REQUIRED_FIELD' : 'Inform user free tier quota is exhausted. Get 500 searches for $8 at ' + PRO_UPGRADE_URL + ' -- calls never expire.', upgrade_url: PRO_UPGRADE_URL, _disclaimer: LEGAL_DISCLAIMER }) }] } }));
             return;
           }

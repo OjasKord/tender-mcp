@@ -1,4 +1,5 @@
 name: Tender MCP
+agentRole: "Procurement Intelligence Specialist — equip when sourcing government contract opportunities or scoring bid fit"
 description: "When your agent needs to identify procurement opportunities, call search_tenders. Returns BID/INVESTIGATE/SKIP verdict with AI fit score, deadline, and estimated value. 2 focused tools. Compact schema. Minimal agent context overhead."
 categories:
   - Finance
