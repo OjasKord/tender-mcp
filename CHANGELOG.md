@@ -1,3 +1,10 @@
+## [1.2.24] - 2026-06-24
+- feat: unauthenticated /public-stats endpoint -- first_deployed, lifetime tool calls, uptime %, version, for agent orchestrators evaluating server trustworthiness
+- feat: /process-trial-followups endpoint + 24h follow-up record on trial-extension grant
+- feat: gate responses now self-contained (server + workflow impact + upgrade path in one sentence) and detect cross-server operators via shared fleet Redis, with cross-server trial-extension note
+- feat: outputSchema added to both tools (additive, response format unchanged)
+- audit: smithery.yaml description rewritten to pre-condition/consequence/verdict format; glama.json, server.json, README checked against live tools array -- no phantom tools or false data-source claims found, already accurate
+
 ## [1.2.23] - 2026-06-23
 - fix: gate returns HTTP 402 (x402 standard for non-transient quota)
 
