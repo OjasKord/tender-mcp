@@ -1,3 +1,9 @@
+## [1.2.25] - 2026-06-25
+- audit: purpose verb + required fields already present on both tools from prior ATO optimisation pass -- no changes needed
+- feat: calls_remaining field added to every tool response -- "unlimited" for paid keys, numeric free-tier headroom otherwise
+- feat: verdict_ttl field added to search_tenders and get_tender_intelligence responses (3600s/1hr -- live contracts change fast)
+- feat: data_source_status field added (full/degraded/partial) -- "degraded" when the only requested source fails or all requested sources fail, "partial" when some (not all) of multiple requested sources fail
+
 ## [1.2.24] - 2026-06-24
 - feat: unauthenticated /public-stats endpoint -- first_deployed, lifetime tool calls, uptime %, version, for agent orchestrators evaluating server trustworthiness
 - feat: /process-trial-followups endpoint + 24h follow-up record on trial-extension grant

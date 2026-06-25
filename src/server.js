@@ -3,7 +3,7 @@ const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
 
-const VERSION = '1.2.24';
+const VERSION = '1.2.25';
 const FIRST_DEPLOYED = '2026-04-09T13:04:02Z';
 const LIFETIME_CALLS_REDIS_KEY = 'tender:lifetime_calls';
 const UPTIME_HEARTBEAT_KEY = 'tender:uptime:heartbeat_count';
@@ -25,6 +25,8 @@ const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
 const freeTierUsage = new Map();
 const usageLog = [];
 const FREE_TIER_LIMIT = 10;
+// Caching/staleness policy per tool, in seconds — live contracts change, so both are short.
+const VERDICT_TTL = { search_tenders: 3600, get_tender_intelligence: 3600 };
 const FREE_TIER_WARNING = 8;
 const apiKeys = new Map();
 const PLAN_LIMITS = { pro: 500, enterprise: Infinity };
@@ -585,6 +587,16 @@ const tools = [
 
 // ─── TOOL EXECUTION ───────────────────────────────────────────────────────────
 
+// Critical source = whichever of UK/EU/US the caller actually requested for this call.
+// requestedSources.length === 1 -> that one source is critical, any failure on it is "degraded".
+// Multiple sources requested: some failing while others return data is "partial"; all failing is "degraded" (no reliable verdict).
+function computeDataSourceStatus(requestedSources, errors) {
+  if (!errors || errors.length === 0) return 'full';
+  const failedSources = new Set(errors.map(e => e.source));
+  if (requestedSources.length === 1 || failedSources.size >= requestedSources.length) return 'degraded';
+  return 'partial';
+}
+
 async function executeTool(name, args, tier) {
   const checkedAt = nowISO();
 
@@ -661,6 +673,8 @@ async function executeTool(name, args, tier) {
       tenders: scoredTenders,
       scoring: scoringMeta,
       errors: errors.length > 0 ? errors : undefined,
+      verdict_ttl: VERDICT_TTL.search_tenders,
+      data_source_status: computeDataSourceStatus(sources, errors),
       checked_at: checkedAt,
       _disclaimer: LEGAL_DISCLAIMER
     };
@@ -696,7 +710,9 @@ async function executeTool(name, args, tier) {
         if (sources.includes('us')) searches.push(searchSAMGov(previewKeyword, 10, 1));
         const results = await Promise.all(searches);
         let previewCount = 0;
+        const previewErrors = [];
         for (const r of results) {
+          if (r.error) { previewErrors.push({ source: r.source, error: r.error }); continue; }
           if (r.source === 'UK_CONTRACTS_FINDER' && r.data) previewCount += r.data.length;
           if (r.source === 'EU_TED' && r.data && r.data.notices) previewCount += r.data.notices.length;
           if (r.source === 'SAM_GOV' && r.data && r.data.opportunitiesData) previewCount += r.data.opportunitiesData.length;
@@ -716,6 +732,8 @@ async function executeTool(name, args, tier) {
             '500 searches/month'
           ],
           upgrade_url: PRO_UPGRADE_URL,
+          verdict_ttl: VERDICT_TTL.get_tender_intelligence,
+          data_source_status: computeDataSourceStatus(sources, previewErrors),
           checked_at: checkedAt,
           _disclaimer: LEGAL_DISCLAIMER
         };
@@ -745,6 +763,8 @@ async function executeTool(name, args, tier) {
         keywords_monitored: keywords, sources_searched: sources,
         total_new_tenders: unique.length, tenders: unique,
         errors: errors.length > 0 ? errors : undefined,
+        verdict_ttl: VERDICT_TTL.get_tender_intelligence,
+        data_source_status: computeDataSourceStatus(sources, errors),
         checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER
       };
     }
@@ -762,7 +782,9 @@ async function executeTool(name, args, tier) {
         if (sources.includes('us')) searches.push(searchSAMGov(keyword, maxResults, 365));
         const results = await Promise.all(searches);
         const awards = [];
+        const previewErrors = [];
         for (const r of results) {
+          if (r.error) { previewErrors.push({ source: r.source, error: r.error }); continue; }
           if (r.source === 'UK_CONTRACTS_FINDER' && r.data) {
             r.data.filter(t => t.tag && t.tag.includes('award')).forEach(t => awards.push(normaliseUKTender(t)));
           }
@@ -790,6 +812,8 @@ async function executeTool(name, args, tier) {
             'Identify teaming partners or threats before bidding'
           ],
           upgrade_url: PRO_UPGRADE_URL,
+          verdict_ttl: VERDICT_TTL.get_tender_intelligence,
+          data_source_status: computeDataSourceStatus(sources, previewErrors),
           checked_at: checkedAt,
           _disclaimer: LEGAL_DISCLAIMER
         };
@@ -815,6 +839,8 @@ async function executeTool(name, args, tier) {
         sources_searched: sources, awards,
         errors: errors.length > 0 ? errors : undefined,
         note: 'Award data may be incomplete — not all contracting authorities publish award notices.',
+        verdict_ttl: VERDICT_TTL.get_tender_intelligence,
+        data_source_status: computeDataSourceStatus(sources, errors),
         checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER
       };
     }
@@ -1246,6 +1272,7 @@ const server = http.createServer(async (req, res) => {
 
           const result = await executeTool(name, toolArgs || {}, access.tier);
           if (access.warning) result._notice = access.warning;
+          result.calls_remaining = access.tier === 'free' ? Math.max(0, access.remaining || 0) : 'unlimited';
 
           // Free tier gating for search_tenders results
           if (access.tier === 'free' && name === 'search_tenders' && result.tenders) {
@@ -1324,6 +1351,7 @@ function setupStdio() {
           continue;
         }
         executeTool(name, toolArgs || {}, 'pro').then(result => {
+          result.calls_remaining = 'unlimited';
           process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: req.id, result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] } }) + '\n');
         }).catch(err => {
           process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: req.id, error: { code: -32603, message: err.message } }) + '\n');
