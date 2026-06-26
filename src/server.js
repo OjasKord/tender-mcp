@@ -3,7 +3,7 @@ const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
 
-const VERSION = '1.2.26';
+const VERSION = '1.2.27';
 const FIRST_DEPLOYED = '2026-04-09T13:04:02Z';
 const LIFETIME_CALLS_REDIS_KEY = 'tender:lifetime_calls';
 const UPTIME_HEARTBEAT_KEY = 'tender:uptime:heartbeat_count';
@@ -1105,6 +1105,7 @@ const server = http.createServer(async (req, res) => {
         freeTierUsage.set(monthKey, Math.max(0, currentCalls - TRIAL_EXTENSION_CALLS));
         trialExtensions.set(emailKey, { name, email, use_case: use_case || '', ip, granted_at: nowISO() });
         saveStats();
+        await redisSet(REDIS_PREFIX + ':trial:' + email.toLowerCase().trim(), { name, email, use_case: use_case || '', ip, timestamp: nowISO(), server: 'tender-mcp' });
         // 24h follow-up record -- processed by /process-trial-followups (fleet cron)
         await redisSet(REDIS_PREFIX + ':followup:' + email.toLowerCase().trim(), { email, name, server: 'tender-mcp', granted_at: nowISO(), sent: false });
         await sendEmail('ojas@kordagencies.com', 'Tender MCP -- Trial Extension: ' + name,

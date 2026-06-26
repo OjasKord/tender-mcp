@@ -1,3 +1,6 @@
+## [1.2.27] - 2026-06-26
+- fix: trial extension requests now written to Redis (tender:trial:{email}) on grant -- permanent audit trail that survives redeploys; previously in-memory only
+
 ## [1.2.26] - 2026-06-26
 - feat: gate response now includes direct email contact option (ojas@kordagencies.com) for custom plans, visible in agent error output
 
