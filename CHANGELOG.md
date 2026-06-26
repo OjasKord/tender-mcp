@@ -1,3 +1,6 @@
+## [1.2.26] - 2026-06-26
+- feat: gate response now includes direct email contact option (ojas@kordagencies.com) for custom plans, visible in agent error output
+
 ## [1.2.25] - 2026-06-25
 - audit: purpose verb + required fields already present on both tools from prior ATO optimisation pass -- no changes needed
 - feat: calls_remaining field added to every tool response -- "unlimited" for paid keys, numeric free-tier headroom otherwise
