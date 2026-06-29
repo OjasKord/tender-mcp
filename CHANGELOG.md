@@ -1,3 +1,6 @@
+## [1.2.30] - 2026-06-29
+- feat: add GET /.well-known/glama.json ownership endpoint for Glama registry verification
+
 ## [1.2.27] - 2026-06-26
 - fix: trial extension requests now written to Redis (tender:trial:{email}) on grant -- permanent audit trail that survives redeploys; previously in-memory only
 
