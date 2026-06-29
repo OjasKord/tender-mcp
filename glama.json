@@ -1,8 +1,19 @@
 {
-  "name": "tender-mcp",
-  "description": "Government tender search and AI opportunity scoring for AI agents. UK Contracts Finder, EU TED, US SAM.gov. AI-powered relevance scoring.",
-  "url": "https://tender-mcp-production.up.railway.app",
-  "categories": ["procurement", "government", "business-intelligence"],
+  "$schema": "https://glama.ai/mcp/servers/schema.json",
+  "name": "Tender MCP — Government Procurement Search",
+  "description": "Government tender search and AI opportunity scoring for AI agents. Searches UK Contracts Finder, EU TED, and US SAM.gov in a single call. Returns AI-relevance-scored opportunities with APPLY/SKIP/MONITOR verdict.",
   "license": "UNLICENSED",
-  "homepage": "https://kordagencies.com"
+  "categories": [
+    "government-data",
+    "business-intelligence",
+    "finance"
+  ],
+  "remote": {
+    "transport": "sse",
+    "url": "https://tender-mcp-production.up.railway.app/sse"
+  },
+  "links": {
+    "homepage": "https://kordagencies.com",
+    "npm": "https://www.npmjs.com/package/tender-mcp"
+  }
 }
