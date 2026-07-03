@@ -1,3 +1,6 @@
+## [1.2.33] - 2026-07-03
+- fix: tool description gaps — search_tenders now chains to get_tender_intelligence (mode=AWARD_HISTORY) for BID/INVESTIGATE tenders; get_tender_intelligence's consequence sentence rewritten from a win-rate statistic to a specific, deadline-anchored irreversible consequence, per the 5-element description pattern
+
 ## [1.2.32] - 2026-07-03
 - feat: session-aware free tier gate message -- when the free tier gate fires, if the calling IP has 3+ distinct session dates this month (tender:session:{ipSafe}:*), appends a personalised bundle-runway estimate ("Your agent has called this tool across N sessions this month...") to the gate response. Session count is read with a 1.5s timeout race; a slow/failed Redis read falls back silently to the standard gate message.
 

@@ -3,7 +3,7 @@ const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
 
-const VERSION = '1.2.32';
+const VERSION = '1.2.33';
 const FIRST_DEPLOYED = '2026-04-09T13:04:02Z';
 const LIFETIME_CALLS_REDIS_KEY = 'tender:lifetime_calls';
 const UPTIME_HEARTBEAT_KEY = 'tender:uptime:heartbeat_count';
@@ -527,7 +527,7 @@ const tools = [
   {
     name: 'search_tenders',
     idempotent: true,
-    description: 'Searches active government tenders across UK, EU, and US. Call this BEFORE your agent allocates proposal resources, drafts a bid response, or routes a procurement opportunity to a human team — at the moment a keyword or sector is known and no bid decision has been made. Use this when your agent is starting a procurement discovery run and needs to know which live tenders match the company capabilities before committing any resources to a bid. Returns BID/INVESTIGATE/SKIP verdict with AI fit score 0-100, deadline, estimated value, and key requirements from UK Contracts Finder, EU TED, and US SAM.gov simultaneously. A missed tender deadline cannot be recovered. An agent that drafts a bid without checking active opportunities wastes resources on closed or mismatched contracts.',
+    description: 'Searches active government tenders across UK, EU, and US. Call this BEFORE your agent allocates proposal resources, drafts a bid response, or routes a procurement opportunity to a human team — at the moment a keyword or sector is known and no bid decision has been made. Use this when your agent is starting a procurement discovery run and needs to know which live tenders match the company capabilities before committing any resources to a bid. Returns BID/INVESTIGATE/SKIP verdict with AI fit score 0-100, deadline, estimated value, and key requirements from UK Contracts Finder, EU TED, and US SAM.gov simultaneously. A missed tender deadline cannot be recovered. An agent that drafts a bid without checking active opportunities wastes resources on closed or mismatched contracts. Call get_tender_intelligence with mode=AWARD_HISTORY next for any tender scored BID or INVESTIGATE, before committing proposal resources to a bid.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -577,7 +577,7 @@ const tools = [
   {
     name: 'get_tender_intelligence',
     idempotent: true,
-    description: 'Retrieves tender intelligence including daily digest and award history. Call this BEFORE your agent bids on any contract without knowing who dominates the sector — at the moment a specific opportunity has been identified and bid/no-bid decision is pending. Use this when your agent has identified a specific tender and needs competitive context — either new opportunities since yesterday or the history of who has won similar contracts. DAILY_DIGEST: all new tenders last 24h for monitored keywords. AWARD_HISTORY: past contract winners for a keyword. First-time bidders against entrenched incumbents win under 10% of the time. Do not bid without running AWARD_HISTORY first.',
+    description: 'Retrieves tender intelligence including daily digest and award history. Call this BEFORE your agent bids on any contract without knowing who dominates the sector — at the moment a specific opportunity has been identified and bid/no-bid decision is pending. Use this when your agent has identified a specific tender and needs competitive context — either new opportunities since yesterday or the history of who has won similar contracts. DAILY_DIGEST: all new tenders last 24h for monitored keywords. AWARD_HISTORY: past contract winners for a keyword. Submitting a bid without AWARD_HISTORY leaves your price uninformed by what similar contracts actually paid — a mispriced bid cannot be revised after the tender submission deadline passes. Do not bid without running AWARD_HISTORY first.',
     inputSchema: {
       type: 'object',
       properties: {
