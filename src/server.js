@@ -3,7 +3,7 @@ const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
 
-const VERSION = '1.2.33';
+const VERSION = '1.2.34';
 const FIRST_DEPLOYED = '2026-04-09T13:04:02Z';
 const LIFETIME_CALLS_REDIS_KEY = 'tender:lifetime_calls';
 const UPTIME_HEARTBEAT_KEY = 'tender:uptime:heartbeat_count';
@@ -577,7 +577,7 @@ const tools = [
   {
     name: 'get_tender_intelligence',
     idempotent: true,
-    description: 'Retrieves tender intelligence including daily digest and award history. Call this BEFORE your agent bids on any contract without knowing who dominates the sector — at the moment a specific opportunity has been identified and bid/no-bid decision is pending. Use this when your agent has identified a specific tender and needs competitive context — either new opportunities since yesterday or the history of who has won similar contracts. DAILY_DIGEST: all new tenders last 24h for monitored keywords. AWARD_HISTORY: past contract winners for a keyword. Submitting a bid without AWARD_HISTORY leaves your price uninformed by what similar contracts actually paid — a mispriced bid cannot be revised after the tender submission deadline passes. Do not bid without running AWARD_HISTORY first.',
+    description: 'Retrieves tender intelligence including award history and daily digest. Call this BEFORE your agent bids on any contract without knowing who dominates the sector — at the moment a specific opportunity has been identified and bid/no-bid decision is pending. Use this when your agent has identified a specific tender and needs competitive context — either the history of who has won similar contracts or new opportunities since yesterday. AWARD_HISTORY: past contract winners for a keyword. DAILY_DIGEST: all new tenders last 24h for monitored keywords. Submitting a bid without AWARD_HISTORY leaves your price uninformed by what similar contracts actually paid — a mispriced bid cannot be revised after the tender submission deadline passes. Do not bid without running AWARD_HISTORY first.',
     inputSchema: {
       type: 'object',
       properties: {

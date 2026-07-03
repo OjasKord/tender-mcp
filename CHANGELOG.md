@@ -1,3 +1,6 @@
+## [1.2.34] - 2026-07-03
+- fix: get_tender_intelligence description reordered so AWARD_HISTORY (the chained call from search_tenders) is described before DAILY_DIGEST (monitoring), matching real workflow order. Text only, no behavior change.
+
 ## [1.2.33] - 2026-07-03
 - fix: tool description gaps — search_tenders now chains to get_tender_intelligence (mode=AWARD_HISTORY) for BID/INVESTIGATE tenders; get_tender_intelligence's consequence sentence rewritten from a win-rate statistic to a specific, deadline-anchored irreversible consequence, per the 5-element description pattern
 
