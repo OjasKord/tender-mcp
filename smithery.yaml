@@ -1,6 +1,6 @@
 name: Tender MCP
 agentRole: "Procurement Intelligence Specialist — equip when sourcing government contract opportunities or scoring bid fit"
-description: "Pre-condition: an agent is starting a procurement discovery run or has identified a specific tender and a bid/no-bid decision is pending. Skip this and a missed tender deadline cannot be recovered, or a bid gets drafted against a closed or mismatched contract -- wasted resources with no recovery path. search_tenders returns BID/INVESTIGATE/SKIP verdict with AI fit score from UK Contracts Finder, EU TED, and US SAM.gov simultaneously; get_tender_intelligence returns daily digest or award history so a first-time bidder doesn't walk in blind against an entrenched incumbent. 2 tools, one verdict each, no further reasoning required."
+description: "Pre-condition: an agent is starting a procurement discovery run or has identified a specific tender and a bid/no-bid decision is pending. Skip this and a missed tender deadline cannot be recovered, or a bid gets drafted against a closed or mismatched contract -- wasted resources with no recovery path. search_tenders returns BID/INVESTIGATE/SKIP verdict with AI fit score from UK Contracts Finder, EU TED, and US SAM.gov simultaneously; get_tender_intelligence returns daily digest or award history so a first-time bidder doesn't walk in blind against an entrenched incumbent. 2 tools, one verdict each, no further reasoning required. Also accepts x402 USDC micropayments per call (base-sepolia testnet, rollout in progress)."
 categories:
   - Finance
   - Research

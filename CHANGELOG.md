@@ -1,3 +1,6 @@
+## [1.3.0] - 2026-07-09
+- feat: x402 V2 dual-rail payment gate (base-sepolia testnet) — search_tenders and get_tender_intelligence accept USDC micropayments ($0.02/call) via PAYMENT-SIGNATURE header, alongside the existing paid-key / free-tier / trial-extension rails. Verify → execute → settle-or-cancel via @x402/core + @x402/evm against the free x402.org facilitator. Envelope only appears on the free-tier-exhausted 402 (invalid-key and paid-cap-reached gates unchanged). Entire feature is gated behind X402_PAY_TO — unset this session, so behavior is byte-identical to 1.2.34 in production until a receiving wallet is configured.
+
 ## [1.2.34] - 2026-07-03
 - fix: get_tender_intelligence description reordered so AWARD_HISTORY (the chained call from search_tenders) is described before DAILY_DIGEST (monitoring), matching real workflow order. Text only, no behavior change.
 
