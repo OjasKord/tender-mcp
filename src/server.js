@@ -3,7 +3,7 @@ const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
 
-const VERSION = '1.3.2';
+const VERSION = '1.3.3';
 const FIRST_DEPLOYED = '2026-04-09T13:04:02Z';
 const LIFETIME_CALLS_REDIS_KEY = 'tender:lifetime_calls';
 const UPTIME_HEARTBEAT_KEY = 'tender:uptime:heartbeat_count';
@@ -23,7 +23,7 @@ const OWNER_KEY = process.env.OWNER_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
 
-// ─── X402 (V2) — dual-rail payment gate, testnet only this session ─────────────
+// ─── X402 (V2) — dual-rail payment gate, testnet + mainnet ─────────────────────
 // Zero-regression contract: every x402 code path below is gated behind X402_ENABLED,
 // which is false unless X402_PAY_TO is set. With it unset, none of this runs.
 const X402_PAY_TO = process.env.X402_PAY_TO || '';
@@ -31,16 +31,36 @@ const X402_NETWORK_ENV = process.env.X402_NETWORK || 'base-sepolia';
 const X402_CAIP_NETWORK = { 'base-sepolia': 'eip155:84532', 'base': 'eip155:8453' }[X402_NETWORK_ENV] || null;
 const X402_FACILITATOR_URL = { 'base-sepolia': 'https://x402.org/facilitator', 'base': 'https://api.cdp.coinbase.com/platform/v2/x402' }[X402_NETWORK_ENV] || null;
 const X402_ENABLED = !!(X402_PAY_TO && X402_CAIP_NETWORK && X402_FACILITATOR_URL);
+const CDP_API_KEY_ID = process.env.CDP_API_KEY_ID || '';
+const CDP_API_KEY_SECRET = process.env.CDP_API_KEY_SECRET || '';
 const TOOL_PRICES = { search_tenders: '$0.02', get_tender_intelligence: '$0.02' };
 
 let x402Server = null;
-let decodePaymentSignatureHeader, encodePaymentRequiredHeader, encodePaymentResponseHeader;
+let decodePaymentSignatureHeader, encodePaymentRequiredHeader, encodePaymentResponseHeader, declareDiscoveryExtension;
 if (X402_ENABLED) {
   const { x402ResourceServer, HTTPFacilitatorClient } = require('@x402/core/server');
   ({ decodePaymentSignatureHeader, encodePaymentRequiredHeader, encodePaymentResponseHeader } = require('@x402/core/http'));
   const { registerExactEvmScheme } = require('@x402/evm/exact/server');
-  x402Server = new x402ResourceServer(new HTTPFacilitatorClient({ url: X402_FACILITATOR_URL }));
+  const bazaarExt = require('@x402/extensions/bazaar');
+  declareDiscoveryExtension = bazaarExt.declareDiscoveryExtension;
+
+  // base-sepolia (testnet): free x402.org facilitator, no auth -- unchanged from the original
+  // testnet-only implementation.
+  // base (mainnet): CDP's hosted facilitator REQUIRES authenticated verify/settle calls. An
+  // unauthenticated client is silently rejected by CDP, which would look armed but never
+  // actually settle -- fail loudly at startup instead of shipping a dead payment rail.
+  let facilitatorConfig = { url: X402_FACILITATOR_URL };
+  if (X402_NETWORK_ENV === 'base') {
+    if (!CDP_API_KEY_ID || !CDP_API_KEY_SECRET) {
+      throw new Error('[x402] X402_NETWORK=base requires CDP_API_KEY_ID and CDP_API_KEY_SECRET -- the CDP mainnet facilitator rejects unauthenticated verify/settle calls. Refusing to start with a dead payment rail.');
+    }
+    const { createFacilitatorConfig } = require('@coinbase/x402');
+    facilitatorConfig = createFacilitatorConfig(CDP_API_KEY_ID, CDP_API_KEY_SECRET);
+  }
+
+  x402Server = new x402ResourceServer(new HTTPFacilitatorClient(facilitatorConfig));
   registerExactEvmScheme(x402Server, {});
+  x402Server.registerExtension(bazaarExt.bazaarResourceServerExtension);
   x402Server.initialize()
     .then(() => console.log('[x402] resource server initialized — network=' + X402_CAIP_NETWORK + ' facilitator=' + X402_FACILITATOR_URL))
     .catch(e => console.error('[x402] initialize failed:', e.message));
@@ -628,6 +648,30 @@ const tools = [
     }
   }
 ];
+
+// ─── X402 BAZAAR DISCOVERY ─────────────────────────────────────────────────────
+// Declared once tool schemas exist above. Only populated when x402 is enabled at all --
+// same zero-regression gate as the rest of the x402 code path (empty object, byte-identical
+// no-op, when X402_PAY_TO is unset).
+const X402_DISCOVERY_EXTENSIONS = {};
+if (X402_ENABLED) {
+  const searchTendersTool = tools.find(t => t.name === 'search_tenders');
+  const tenderIntelligenceTool = tools.find(t => t.name === 'get_tender_intelligence');
+  X402_DISCOVERY_EXTENSIONS.search_tenders = declareDiscoveryExtension({
+    toolName: 'search_tenders',
+    description: searchTendersTool.description.slice(0, 500),
+    inputSchema: searchTendersTool.inputSchema,
+    example: { keyword: 'cybersecurity', company_profile: 'Managed IT security services provider, 50 employees' },
+    output: { example: { keyword: 'cybersecurity', total_found: 3, tenders: [{ id: 'ocds-abc123', title: 'IT Security Support Framework', contracting_authority: 'UK Ministry of Defence', ai_score: 82, recommendation: 'BID' }] } }
+  });
+  X402_DISCOVERY_EXTENSIONS.get_tender_intelligence = declareDiscoveryExtension({
+    toolName: 'get_tender_intelligence',
+    description: tenderIntelligenceTool.description.slice(0, 500),
+    inputSchema: tenderIntelligenceTool.inputSchema,
+    example: { mode: 'AWARD_HISTORY', keyword: 'cybersecurity' },
+    output: { example: { mode: 'AWARD_HISTORY', keyword: 'cybersecurity', total_awards_found: 12, awards: [] } }
+  });
+}
 
 // ─── TOOL EXECUTION ───────────────────────────────────────────────────────────
 
@@ -1371,7 +1415,7 @@ const server = http.createServer(async (req, res) => {
             if (X402_ENABLED && access.tier === 'free_limit_reached' && TOOL_PRICES[name]) {
               try {
                 const built = await x402Server.buildPaymentRequirements({ scheme: 'exact', payTo: X402_PAY_TO, price: TOOL_PRICES[name], network: X402_CAIP_NETWORK, maxTimeoutSeconds: 60 });
-                const paymentRequired = await x402Server.createPaymentRequiredResponse(built, { url: 'https://tender-mcp-production.up.railway.app', description: 'Tender MCP — ' + name, mimeType: 'application/json' });
+                const paymentRequired = await x402Server.createPaymentRequiredResponse(built, { url: 'https://tender-mcp-production.up.railway.app', description: 'Tender MCP — ' + name, mimeType: 'application/json' }, undefined, X402_DISCOVERY_EXTENSIONS[name]);
                 gateHeaders['PAYMENT-REQUIRED'] = encodePaymentRequiredHeader(paymentRequired);
                 gateBody.payment_rails = ['x402', 'stripe_checkout', 'trial_extension'];
               } catch (e) { console.error('[x402] failed to build 402 envelope:', e.message); }

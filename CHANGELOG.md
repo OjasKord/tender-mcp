@@ -1,3 +1,8 @@
+## [1.3.3] - 2026-07-22
+- feat: x402 mainnet (base) support — X402_NETWORK=base now authenticates to the CDP-hosted facilitator via @coinbase/x402 (CDP mainnet requires signed verify/settle calls; the free x402.org testnet facilitator does not). Missing CDP_API_KEY_ID/CDP_API_KEY_SECRET while X402_NETWORK=base fails loudly at startup instead of silently running an unauthenticated, non-functional payment rail. base-sepolia path unchanged.
+- feat: Bazaar discovery wiring — bazaarResourceServerExtension registered and declareDiscoveryExtension() attached to search_tenders / get_tender_intelligence's 402 responses (@x402/extensions), so a real settlement on the CDP facilitator can be cataloged. Only populated when x402 is enabled at all — no-op while X402_PAY_TO is unset.
+- Deployed dormant: X402_PAY_TO/X402_NETWORK unset this release, byte-identical to 1.3.2 in production until mainnet is armed.
+
 ## [1.3.0] - 2026-07-09
 - feat: x402 V2 dual-rail payment gate (base-sepolia testnet) — search_tenders and get_tender_intelligence accept USDC micropayments ($0.02/call) via PAYMENT-SIGNATURE header, alongside the existing paid-key / free-tier / trial-extension rails. Verify → execute → settle-or-cancel via @x402/core + @x402/evm against the free x402.org facilitator. Envelope only appears on the free-tier-exhausted 402 (invalid-key and paid-cap-reached gates unchanged). Entire feature is gated behind X402_PAY_TO — unset this session, so behavior is byte-identical to 1.2.34 in production until a receiving wallet is configured.
 
