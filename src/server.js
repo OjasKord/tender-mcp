@@ -3,7 +3,13 @@ const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
 
-const VERSION = '1.3.3';
+// jose@6 (pulled in transitively by @coinbase/x402 for mainnet CDP auth) is a WebCrypto-only
+// build that references a bare global `crypto`. Node 20+ exposes that global by default; Node
+// 18 (Railway's current runtime) does not unless run with --experimental-global-webcrypto.
+// Polyfilling here is a no-op wherever the global already exists.
+if (!globalThis.crypto) globalThis.crypto = crypto.webcrypto;
+
+const VERSION = '1.3.4';
 const FIRST_DEPLOYED = '2026-04-09T13:04:02Z';
 const LIFETIME_CALLS_REDIS_KEY = 'tender:lifetime_calls';
 const UPTIME_HEARTBEAT_KEY = 'tender:uptime:heartbeat_count';
@@ -36,6 +42,11 @@ const CDP_API_KEY_SECRET = process.env.CDP_API_KEY_SECRET || '';
 const TOOL_PRICES = { search_tenders: '$0.02', get_tender_intelligence: '$0.02' };
 
 let x402Server = null;
+// True only once initialize() has genuinely resolved. Dynamic import() (and even the pre-existing
+// testnet initialize() call) are async, so there is a real window after the process starts
+// accepting connections where x402Server exists but isn't ready yet -- checkAccess uses this flag
+// to fail closed on a payment attempt during that window instead of silently treating it as free.
+let x402Ready = false;
 let decodePaymentSignatureHeader, encodePaymentRequiredHeader, encodePaymentResponseHeader, declareDiscoveryExtension;
 if (X402_ENABLED) {
   const { x402ResourceServer, HTTPFacilitatorClient } = require('@x402/core/server');
@@ -46,24 +57,43 @@ if (X402_ENABLED) {
 
   // base-sepolia (testnet): free x402.org facilitator, no auth -- unchanged from the original
   // testnet-only implementation.
-  // base (mainnet): CDP's hosted facilitator REQUIRES authenticated verify/settle calls. An
-  // unauthenticated client is silently rejected by CDP, which would look armed but never
-  // actually settle -- fail loudly at startup instead of shipping a dead payment rail.
-  let facilitatorConfig = { url: X402_FACILITATOR_URL };
   if (X402_NETWORK_ENV === 'base') {
+    // base (mainnet): CDP's hosted facilitator REQUIRES authenticated verify/settle calls. An
+    // unauthenticated client is silently rejected by CDP, which would look armed but never
+    // actually settle -- fail loudly at startup instead of shipping a dead payment rail.
     if (!CDP_API_KEY_ID || !CDP_API_KEY_SECRET) {
       throw new Error('[x402] X402_NETWORK=base requires CDP_API_KEY_ID and CDP_API_KEY_SECRET -- the CDP mainnet facilitator rejects unauthenticated verify/settle calls. Refusing to start with a dead payment rail.');
     }
-    const { createFacilitatorConfig } = require('@coinbase/x402');
-    facilitatorConfig = createFacilitatorConfig(CDP_API_KEY_ID, CDP_API_KEY_SECRET);
+    // @coinbase/x402 pulls in @coinbase/cdp-sdk, whose CJS build require()s jose@6 (ESM-only) --
+    // that throws ERR_REQUIRE_ESM under plain require() on Node runtimes without require(esm)
+    // support (Node 18, Railway's current default). Loading it via dynamic import() instead
+    // walks the package's "import" export condition end-to-end (cdp-sdk's own subpaths mirror
+    // the same condition), so jose loads as ESM too and the incompatibility never triggers.
+    import('@coinbase/x402').then(({ createFacilitatorConfig }) => {
+      x402Server = new x402ResourceServer(new HTTPFacilitatorClient(createFacilitatorConfig(CDP_API_KEY_ID, CDP_API_KEY_SECRET)));
+      registerExactEvmScheme(x402Server, {});
+      x402Server.registerExtension(bazaarExt.bazaarResourceServerExtension);
+      return x402Server.initialize();
+    }).then(() => {
+      x402Ready = true;
+      console.log('[x402] resource server initialized — network=' + X402_CAIP_NETWORK + ' facilitator=' + X402_FACILITATOR_URL);
+    }).catch(e => {
+      console.error('[x402] mainnet facilitator setup failed:', e.message);
+      // A mainnet rail that looks armed (X402_PAY_TO set) but can never verify/settle is worse
+      // than not starting at all -- crash loudly instead of serving silently-dead payments.
+      process.exit(1);
+    });
+  } else {
+    x402Server = new x402ResourceServer(new HTTPFacilitatorClient({ url: X402_FACILITATOR_URL }));
+    registerExactEvmScheme(x402Server, {});
+    x402Server.registerExtension(bazaarExt.bazaarResourceServerExtension);
+    x402Server.initialize()
+      .then(() => {
+        x402Ready = true;
+        console.log('[x402] resource server initialized — network=' + X402_CAIP_NETWORK + ' facilitator=' + X402_FACILITATOR_URL);
+      })
+      .catch(e => console.error('[x402] initialize failed:', e.message));
   }
-
-  x402Server = new x402ResourceServer(new HTTPFacilitatorClient(facilitatorConfig));
-  registerExactEvmScheme(x402Server, {});
-  x402Server.registerExtension(bazaarExt.bazaarResourceServerExtension);
-  x402Server.initialize()
-    .then(() => console.log('[x402] resource server initialized — network=' + X402_CAIP_NETWORK + ' facilitator=' + X402_FACILITATOR_URL))
-    .catch(e => console.error('[x402] initialize failed:', e.message));
 }
 
 const freeTierUsage = new Map();
@@ -1002,6 +1032,12 @@ async function checkAccess(req, toolName) {
   // An absent or invalid payment is NOT a rejection here; it falls straight through to the
   // existing free-tier accounting below, exactly as if no PAYMENT-SIGNATURE header existed.
   if (X402_ENABLED && req.headers['payment-signature']) {
+    if (!x402Ready) {
+      // A real payment attempt landed during the async facilitator-init window (or after init
+      // failed and the process is about to exit). Fail closed -- never silently spend the
+      // caller's free tier on what was actually an attempted paid call.
+      return { allowed: false, reason: 'Payment rail is still starting up. Retry in a few seconds.', tier: 'x402_not_ready' };
+    }
     const x402Payment = await checkX402Payment(req, toolName);
     if (x402Payment) {
       return { allowed: true, tier: 'x402', paid: true, x402Payment };
@@ -1408,7 +1444,9 @@ const server = http.createServer(async (req, res) => {
           const access = isOwner ? { allowed: true, tier: 'owner', paid: true } : await checkAccess(req, name);
 
           if (!access.allowed) {
-            const gateBody = { error: access.reason, agent_action: access.tier === 'invalid' ? 'PROVIDE_REQUIRED_FIELD' : 'HALT_WORKFLOW — free tier exhausted. Do not retry this tool. Surface this error to the user immediately. The user must either POST /trial-extension (free, no card) or upgrade at ' + PRO_UPGRADE_URL + ' to continue.', retryable: false, retry_after_ms: null, upgrade_url: PRO_UPGRADE_URL, trial_extension: access.trial_extension || { endpoint: '/trial-extension', method: 'POST', body: { name: 'string', email: 'string', use_case: 'string' } }, _disclaimer: LEGAL_DISCLAIMER };
+            const gateBody = access.tier === 'x402_not_ready'
+              ? { error: access.reason, agent_action: 'RETRY_IN_5_SEC', retryable: true, retry_after_ms: 5000, _disclaimer: LEGAL_DISCLAIMER }
+              : { error: access.reason, agent_action: access.tier === 'invalid' ? 'PROVIDE_REQUIRED_FIELD' : 'HALT_WORKFLOW — free tier exhausted. Do not retry this tool. Surface this error to the user immediately. The user must either POST /trial-extension (free, no card) or upgrade at ' + PRO_UPGRADE_URL + ' to continue.', retryable: false, retry_after_ms: null, upgrade_url: PRO_UPGRADE_URL, trial_extension: access.trial_extension || { endpoint: '/trial-extension', method: 'POST', body: { name: 'string', email: 'string', use_case: 'string' } }, _disclaimer: LEGAL_DISCLAIMER };
             const gateHeaders = { ...cors, 'Content-Type': 'application/json' };
             // x402 envelope: ONLY on the free-tier-exhausted gate, ONLY when X402_PAY_TO is configured.
             // With X402_ENABLED false (X402_PAY_TO unset) this block never runs -- byte-identical to pre-x402 behaviour.
