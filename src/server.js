@@ -9,7 +9,7 @@ const fs = require('fs');
 // Polyfilling here is a no-op wherever the global already exists.
 if (!globalThis.crypto) globalThis.crypto = crypto.webcrypto;
 
-const VERSION = '1.3.4';
+const VERSION = '1.3.5';
 const FIRST_DEPLOYED = '2026-04-09T13:04:02Z';
 const LIFETIME_CALLS_REDIS_KEY = 'tender:lifetime_calls';
 const UPTIME_HEARTBEAT_KEY = 'tender:uptime:heartbeat_count';
@@ -195,7 +195,26 @@ function getPlanFromProduct(name) {
   return name.toLowerCase().includes('enterprise') ? 'enterprise' : 'pro';
 }
 
+// Redis-independent circuit breaker for the email paths that remain after
+// raw gate-hit emails were removed 2026-07-27 (trial-extension request +
+// payment events, including x402 settlement, only). Caps total sends
+// server-wide so a flood of fake trial-extension requests can't exhaust
+// the fleet's shared Resend quota even if Redis-backed dedup elsewhere is
+// unavailable (Lesson 209). 20/hr is generous enough it will never
+// suppress a genuine x402 settlement alert in practice.
+const EMAIL_CIRCUIT_BREAKER_LIMIT = 20;
+let emailBreakerCount = 0;
+let emailBreakerWindowStart = Date.now();
+function emailCircuitBreakerAllow() {
+  const now = Date.now();
+  if (now - emailBreakerWindowStart > 3600000) { emailBreakerWindowStart = now; emailBreakerCount = 0; }
+  if (emailBreakerCount >= EMAIL_CIRCUIT_BREAKER_LIMIT) return false;
+  emailBreakerCount++;
+  return true;
+}
+
 async function sendEmail(to, subject, html) {
+  if (!emailCircuitBreakerAllow()) { console.log('[EmailBreaker] suppressed email to ' + to + ' — hourly cap reached'); return { suppressed: true }; }
   return new Promise((resolve) => {
     const body = JSON.stringify({ from: 'Tender MCP <ojas@kordagencies.com>', to: [to], subject, html });
     const req = https.request({
@@ -213,20 +232,6 @@ async function sendEmail(to, subject, html) {
 function truncateIp(ip) {
   const parts = (ip || '').split('.');
   return parts.length === 4 ? parts.slice(0, 3).join('.') + '.0' : ip;
-}
-
-async function notifyGateHit(serverName, ip, toolName, totalCalls, stripeUrl) {
-  const ip24 = truncateIp(ip);
-  const dedupKey = REDIS_PREFIX + ':gate_email:' + ip24;
-  try {
-    const recent = await redisGet(dedupKey);
-    if (recent) { console.log('[GateNotify] suppressed duplicate for ' + ip24); return; }
-    await redisSet(dedupKey, nowISO());
-    await redisExpire(dedupKey, 3600);
-  } catch(e) { /* Redis unavailable — fall through and send */ }
-  const html = '<p>Server: ' + serverName + '</p><p>IP: ' + ip24 + '</p><p>Tool: ' + (toolName || 'unknown') + '</p><p>Calls this month: ' + totalCalls + '</p><p>Time: ' + new Date().toISOString() + '</p><p>Upgrade: ' + stripeUrl + '</p>';
-  sendEmail('ojas@kordagencies.com', '[Gate Hit] ' + serverName + ' — ' + ip24 + ' hit free tier limit', html)
-    .catch(e => console.error('[GateNotify] failed:', e.message));
 }
 
 async function sendApiKeyEmail(email, apiKey, plan) {
@@ -427,6 +432,39 @@ async function saveFreeTierToRedis() {
     }
     await redisSet(FREE_TIER_REDIS_KEY, Array.from(existingMap.entries()));
   } catch(e) { console.error('[FreeTier] save failed:', e); }
+}
+
+const USAGE_LOG_REDIS_KEY = REDIS_PREFIX + ':usage_log';
+const TOOL_USAGE_COUNTS_REDIS_KEY = REDIS_PREFIX + ':tool_usage_counts';
+
+async function loadUsageStatsFromRedis() {
+  try {
+    const log = await redisGet(USAGE_LOG_REDIS_KEY);
+    if (Array.isArray(log)) usageLog.push(...log);
+    const counts = await redisGet(TOOL_USAGE_COUNTS_REDIS_KEY);
+    if (counts && typeof counts === 'object') Object.assign(toolUsageCounts, counts);
+    console.log('[UsageStats] Loaded ' + usageLog.length + ' log entries, ' + Object.keys(toolUsageCounts).length + ' tool counters from Redis');
+  } catch(e) { console.error('[UsageStats] load failed:', e); }
+}
+
+// Fire-and-forget — redisSet already catches its own errors internally, so
+// this never blocks or throws on the calling request path.
+function saveUsageStatsToRedis() {
+  redisSet(USAGE_LOG_REDIS_KEY, usageLog.slice(-1000)).catch(() => {});
+  redisSet(TOOL_USAGE_COUNTS_REDIS_KEY, toolUsageCounts).catch(() => {});
+}
+
+// Gate hits (free-tier exhausted, bundle exhausted) return before the normal
+// success-path counters run — this makes them visible as EVENTS to
+// /daily-report and /stats without touching freeTierUsage/quota logic or
+// any x402 payment path.
+function recordGatedCall(ip, toolName) {
+  usageLog.push({ tool: toolName, tier: 'gated', time: new Date().toISOString(), ip: (ip || 'unknown').slice(0, 8) + '...' });
+  if (usageLog.length > 1000) usageLog.shift();
+  toolUsageCounts[toolName] = (toolUsageCounts[toolName] || 0) + 1;
+  saveStats();
+  saveUsageStatsToRedis();
+  appendSessionLog(ip, toolName).catch((e) => console.error('[SessionLog] appendSessionLog failed:', e));
 }
 
 // ─── DATA SOURCES ─────────────────────────────────────────────────────────────
@@ -1020,6 +1058,7 @@ async function checkAccess(req, toolName) {
     const record = apiKeys.get(apiKey);
     if (!record) return { allowed: false, reason: 'Invalid API key. Get yours at kordagencies.com', tier: 'invalid' };
     if (record.limit !== Infinity && record.calls >= record.limit) {
+      recordGatedCall(ipAll, toolName);
       recordFleetGateHit(ipAll).catch(() => {});
       const crossServerNote = await buildCrossServerNote(ipAll);
       return { allowed: false, reason: 'Tender MCP monthly limit reached -- tender search is blocked for this workflow until you upgrade at kordagencies.com. Monthly limit of ' + record.limit + ' searches reached.' + (crossServerNote ? ' ' + crossServerNote : ''), tier: 'limit_reached' };
@@ -1049,7 +1088,7 @@ async function checkAccess(req, toolName) {
   const monthKey = getMonthKey(ip);
   const calls = freeTierUsage.get(monthKey) || 0;
   if (calls >= FREE_TIER_LIMIT) {
-    notifyGateHit('Tender MCP', ip, toolName, calls, PRO_UPGRADE_URL).catch(() => {});
+    recordGatedCall(ip, toolName);
     recordFleetGateHit(ip).catch(() => {});
     const crossServerNote = await buildCrossServerNote(ip);
     const ipSafe = ip.replace(/:/g, '_').replace(/\s/g, '');
@@ -1361,8 +1400,11 @@ const server = http.createServer(async (req, res) => {
       const cutoffMs = Date.now() - 86400000;
 
       const recentLog = usageLog.filter(e => e.time >= since24h);
-      const calls24h = recentLog.length;
-      const unique24h = new Set(recentLog.map(e => e.ip)).size;
+      const successLog = recentLog.filter(e => e.tier !== 'gated');
+      const gatedLog = recentLog.filter(e => e.tier === 'gated');
+      const calls24h = successLog.length;
+      const gateHits24h = gatedLog.length;
+      const unique24h = new Set(successLog.map(e => e.ip)).size;
 
       const limitIPs = new Set();
       for (const [key, count] of freeTierUsage.entries()) {
@@ -1392,6 +1434,7 @@ const server = http.createServer(async (req, res) => {
         server: 'tender-mcp',
         date: today,
         calls_24h: calls24h,
+        gate_hits_24h: gateHits24h,
         unique_ips_24h: unique24h,
         limit_hits: limitIPs.size,
         trial_extensions: trialCount,
@@ -1469,6 +1512,7 @@ const server = http.createServer(async (req, res) => {
           if (usageLog.length > 1000) usageLog.shift();
           toolUsageCounts[name] = (toolUsageCounts[name] || 0) + 1;
           saveStats();
+          saveUsageStatsToRedis();
           redisIncr(LIFETIME_CALLS_REDIS_KEY).catch(() => {});
           appendSessionLog(ip, name).catch((e) => console.error('[SessionLog] appendSessionLog failed:', e));
 
@@ -1508,6 +1552,14 @@ const server = http.createServer(async (req, res) => {
             }
 
             redisIncr(REDIS_PREFIX + ':x402_calls:' + new Date().toISOString().slice(0, 7)).catch(() => {});
+            // Distinct, louder alert for a real x402 settlement -- this is the fleet's key
+            // signal (first real external agent-native payment). Never blocks the response;
+            // failure here must never affect the already-settled, already-delivered result.
+            sendEmail(
+              'ojas@kordagencies.com',
+              '[x402 SETTLEMENT] Tender — real payment received',
+              '<p><b>Tool:</b> ' + name + '</p><p><b>Network:</b> ' + X402_CAIP_NETWORK + '</p><p><b>Time:</b> ' + nowISO() + '</p><p><b>Settlement:</b> ' + JSON.stringify(settleResult) + '</p>'
+            ).catch(e => console.error('[x402] settlement alert email failed:', e.message));
             x402Result.calls_remaining = 'unlimited';
             res.writeHead(200, { ...cors, 'Content-Type': 'application/json', 'PAYMENT-RESPONSE': encodePaymentResponseHeader(settleResult) });
             res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify(x402Result, null, 2) }] } }));
@@ -1617,6 +1669,7 @@ server.listen(PORT, async () => {
   loadApiKeys();
   await loadApiKeysFromRedis();
   await loadFreeTierFromRedis();
+  await loadUsageStatsFromRedis();
   await initUptimeTracking();
   console.log('Tender MCP v' + VERSION + ' running on port ' + PORT);
   console.log('Tools: 2 (search_tenders, get_tender_intelligence)');
