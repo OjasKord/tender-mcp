@@ -9,7 +9,7 @@ const fs = require('fs');
 // Polyfilling here is a no-op wherever the global already exists.
 if (!globalThis.crypto) globalThis.crypto = crypto.webcrypto;
 
-const VERSION = '1.3.6';
+const VERSION = '1.3.8';
 const FIRST_DEPLOYED = '2026-04-09T13:04:02Z';
 const LIFETIME_CALLS_REDIS_KEY = 'tender:lifetime_calls';
 const UPTIME_HEARTBEAT_KEY = 'tender:uptime:heartbeat_count';
@@ -39,7 +39,16 @@ const X402_FACILITATOR_URL = { 'base-sepolia': 'https://x402.org/facilitator', '
 const X402_ENABLED = !!(X402_PAY_TO && X402_CAIP_NETWORK && X402_FACILITATOR_URL);
 const CDP_API_KEY_ID = process.env.CDP_API_KEY_ID || '';
 const CDP_API_KEY_SECRET = process.env.CDP_API_KEY_SECRET || '';
-const TOOL_PRICES = { search_tenders: '$0.02', get_tender_intelligence: '$0.02' };
+const TOOL_PRICES = { search_tenders: '$0.03', get_tender_intelligence: '$0.02' };
+// search_tenders is metered, not flat-priced: AI fit-scoring only runs when company_profile is
+// supplied (see executeTool), so that's the only path with real marginal cost. Charging the
+// no-profile path the same price would tax ~$0-cost scanner/free traffic for no reason -- cost
+// recovery, not margin, is the goal here. get_tender_intelligence has no AI path and keeps its
+// flat price unchanged.
+function getToolPrice(toolName, toolArgs) {
+  if (toolName === 'search_tenders') return (toolArgs && toolArgs.company_profile) ? TOOL_PRICES.search_tenders : null;
+  return TOOL_PRICES[toolName] || null;
+}
 
 let x402Server = null;
 // True only once initialize() has genuinely resolved. Dynamic import() (and even the pre-existing
@@ -1038,9 +1047,9 @@ async function logX402SettleFailure(details) {
 // Verifies a payment attached via the PAYMENT-SIGNATURE header. Returns null (not an error) if
 // x402 isn't enabled, the tool isn't priced, no payment header is present, or the payment doesn't
 // verify -- all of these mean "fall through to normal free-tier/gate behaviour", not "reject".
-async function checkX402Payment(req, toolName) {
+async function checkX402Payment(req, toolName, toolArgs) {
   if (!X402_ENABLED) return null;
-  const price = TOOL_PRICES[toolName];
+  const price = getToolPrice(toolName, toolArgs);
   if (!price) return null;
   const sigHeader = req.headers['payment-signature'];
   if (!sigHeader) return null;
@@ -1068,7 +1077,7 @@ async function checkOwnerKey(req, requestBody) {
   return true;
 }
 
-async function checkAccess(req, toolName) {
+async function checkAccess(req, toolName, toolArgs) {
   const apiKey = req.headers['x-api-key'];
   const rawIpAll = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
   const ipAll = rawIpAll.split(',')[0].trim();
@@ -1096,7 +1105,7 @@ async function checkAccess(req, toolName) {
       // caller's free tier on what was actually an attempted paid call.
       return { allowed: false, reason: 'Payment rail is still starting up. Retry in a few seconds.', tier: 'x402_not_ready' };
     }
-    const x402Payment = await checkX402Payment(req, toolName);
+    const x402Payment = await checkX402Payment(req, toolName, toolArgs);
     if (x402Payment) {
       return { allowed: true, tier: 'x402', paid: true, x402Payment };
     }
@@ -1523,7 +1532,7 @@ const server = http.createServer(async (req, res) => {
             return;
           }
           const isOwner = await checkOwnerKey(req, request);
-          const access = isOwner ? { allowed: true, tier: 'owner', paid: true } : await checkAccess(req, name);
+          const access = isOwner ? { allowed: true, tier: 'owner', paid: true } : await checkAccess(req, name, toolArgs);
 
           if (!access.allowed) {
             const gateBody = access.tier === 'x402_not_ready'
@@ -1532,9 +1541,10 @@ const server = http.createServer(async (req, res) => {
             const gateHeaders = { ...cors, 'Content-Type': 'application/json' };
             // x402 envelope: ONLY on the free-tier-exhausted gate, ONLY when X402_PAY_TO is configured.
             // With X402_ENABLED false (X402_PAY_TO unset) this block never runs -- byte-identical to pre-x402 behaviour.
-            if (X402_ENABLED && access.tier === 'free_limit_reached' && TOOL_PRICES[name]) {
+            const gatedToolPrice = getToolPrice(name, toolArgs);
+            if (X402_ENABLED && access.tier === 'free_limit_reached' && gatedToolPrice) {
               try {
-                const built = await x402Server.buildPaymentRequirements({ scheme: 'exact', payTo: X402_PAY_TO, price: TOOL_PRICES[name], network: X402_CAIP_NETWORK, maxTimeoutSeconds: 60 });
+                const built = await x402Server.buildPaymentRequirements({ scheme: 'exact', payTo: X402_PAY_TO, price: gatedToolPrice, network: X402_CAIP_NETWORK, maxTimeoutSeconds: 60 });
                 const paymentRequired = await x402Server.createPaymentRequiredResponse(built, { url: 'https://tender-mcp-production.up.railway.app', description: 'Tender MCP — ' + name, mimeType: 'application/json' }, undefined, X402_DISCOVERY_EXTENSIONS[name]);
                 gateHeaders['PAYMENT-REQUIRED'] = encodePaymentRequiredHeader(paymentRequired);
                 gateBody.payment_rails = ['x402', 'stripe_checkout', 'trial_extension'];
